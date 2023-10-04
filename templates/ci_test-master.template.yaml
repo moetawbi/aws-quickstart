@@ -45,7 +45,7 @@ Parameters:
     Description: 'The AWS Region where the bucket  is hosted. When using your own bucket, you must specify this value.'
     Type: String
   GitRepo:
-    Default: https://github.com/aws-quickstart/quickstart-linux-utilities.git
+    Default: https://github.com/moetawbi/aws-quickstart.git
     Type: String
   GitBranch:
     Default: develop
