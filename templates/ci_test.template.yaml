@@ -176,6 +176,8 @@ Mappings:
       US1804HVM: ami-0edf3b95e26a682df
       US2004HVM: ami-0e8271975f6af5c8d
       SLES15HVM: ami-0f1e3b3fb0fec0361
+    me-central-1:
+      AMZNLINUX2: ami-041d6256ed0f2061c
   LinuxAMINameMap:
     Amazon-Linux2-HVM:
       Code: AMZNLINUX2
