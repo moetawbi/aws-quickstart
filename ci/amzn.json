@@ -16,7 +16,7 @@
 },
 {
    "ParameterKey": "GitRepo", 
-   "ParameterValue": "https://github.com/aws-quickstart/quickstart-linux-utilities.git"
+   "ParameterValue": "https://github.com/moetawbi/aws-quickstart.git"
 },
 {
    "ParameterKey": "TestAMIOS", 
