@@ -80,6 +80,14 @@ class TrengoClient:
                 break
         return tickets
 
+    def get_ticket(self, ticket_id) -> dict:
+        payload = self._request("GET", f"/tickets/{ticket_id}")
+        if isinstance(payload, dict):
+            # Some deployments wrap the record: {"data": {...}}
+            data = payload.get("data")
+            return data if isinstance(data, dict) else payload
+        return {"error": "Unexpected Trengo response."}
+
     def get_messages(self, ticket_id) -> list[dict] | dict:
         payload = self._request("GET", f"/tickets/{ticket_id}/messages")
         data = self._data(payload)

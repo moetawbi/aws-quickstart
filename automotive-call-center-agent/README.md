@@ -72,6 +72,8 @@ trengo.py       Trengo REST client (tickets, messages, replies) with
                 tolerant message-shape parsing.
 trengo_worker.py Polls open Trengo tickets and answers new customer
                 messages with the agent; deduplicates and persists state.
+trengo_webhook.py Webhook listener - Trengo pushes inbound-message events
+                to this HTTP server for instant replies (same dedupe/state).
 prompts.py      The system prompt: call-handling procedure, identity
                 verification, recall policy, lead capture with consent,
                 escalation rules, phone style.
@@ -103,6 +105,10 @@ iteration ends when Claude has a final spoken reply for the caller.
 | `TRENGO_POLL_SECONDS` | `20` | How often the worker polls for new customer messages |
 | `TRENGO_TICKET_STATUS` | `OPEN` | Which tickets the worker watches |
 | `TRENGO_STATE_FILE` | `./.trengo_state.json` | Where replied-message ids persist across restarts |
+| `TRENGO_WEBHOOK_SECRET` | — (required) | Shared secret Trengo must send (`?token=` or `X-Webhook-Token` header) |
+| `TRENGO_WEBHOOK_PORT` | `8080` | Port the webhook listener binds |
+| `TRENGO_WEBHOOK_PATH` | `/webhooks/trengo` | URL path the listener accepts events on |
+| `TRENGO_WEBHOOK_ALLOW_INSECURE` | — | Set to `1` to run the listener without a secret (local dev only) |
 
 ## Feeding the agent knowledge files
 
@@ -190,9 +196,50 @@ How it works:
 - Internal notes are ignored; agent errors are logged and retried on the
   next cycle without marking the message answered.
 
-Polling needs no public URL. To go push-based instead, point a Trengo
-webhook for inbound messages at a small HTTP endpoint that calls
-`TrengoWorker.handle_ticket(ticket)` — the per-ticket logic is identical.
+### Webhooks (instant replies)
+
+For push instead of polling, run the webhook listener and point Trengo
+at it:
+
+```bash
+export ANTHROPIC_API_KEY=...
+export TRENGO_API_KEY=...
+export TRENGO_WEBHOOK_SECRET=$(openssl rand -hex 24)
+python trengo_webhook.py    # listens on 0.0.0.0:8080
+```
+
+In Trengo, go to **Settings → Webhooks**, create a webhook for **inbound
+message** events, and set the URL to:
+
+```
+https://<your-public-host>/webhooks/trengo?token=<TRENGO_WEBHOOK_SECRET>
+```
+
+The listener needs a publicly reachable URL (a reverse proxy with TLS in
+production; a tunnel like ngrok for testing). `GET /healthz` is provided
+for load-balancer checks.
+
+Security and reliability properties:
+
+- **The webhook is only a doorbell.** The handler extracts the ticket id,
+  returns 200 immediately, and a background worker re-fetches the ticket
+  through the Trengo API — replying only if the latest message is from
+  the customer. Payload text never reaches the agent, so a forged or
+  malformed event can't inject anything; duplicate, replayed, or
+  out-of-order deliveries are harmless no-ops.
+- Requests must carry the shared secret (query `?token=` or an
+  `X-Webhook-Token` header, constant-time compared); without it the
+  server refuses to start unless explicitly overridden for local dev.
+- Events for a ticket already queued collapse into one run; events
+  arriving *while* a ticket is being handled re-queue it so nothing is
+  missed. JSON and form-encoded payload shapes are both accepted, and
+  events without a ticket id are acknowledged (200) but ignored, so
+  Trengo doesn't retry-storm.
+
+Webhooks and polling share the same state file and dedupe rules, so a
+belt-and-braces setup is safe: run the webhook listener as primary and a
+cron `python trengo_worker.py --once` every few minutes as a safety net
+for missed deliveries — nothing gets answered twice.
 
 Endpoint paths and message-field parsing live in `trengo.py`; if your
 Trengo account's API differs from the v2 shapes used there (see

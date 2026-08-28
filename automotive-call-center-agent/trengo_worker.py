@@ -152,6 +152,16 @@ class TrengoWorker:
         _log(f"ticket {ticket_id}: replied ({len(reply)} chars)")
         return "replied"
 
+    def handle_ticket_id(self, ticket_id) -> str:
+        """Webhook entry point: process one ticket known only by id. Fetches
+        the ticket for its metadata (falling back to a bare record if that
+        fails - metadata only enriches the first turn) and runs the same
+        latest-message-inbound / dedupe logic as polling."""
+        ticket = self.client.get_ticket(ticket_id)
+        if not isinstance(ticket, dict) or "error" in ticket or ticket.get("id") is None:
+            ticket = {"id": ticket_id}
+        return self.handle_ticket(ticket)
+
     # -- polling ---------------------------------------------------------------
 
     def poll_once(self) -> dict:
