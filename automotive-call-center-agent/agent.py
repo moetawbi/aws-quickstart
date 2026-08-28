@@ -22,6 +22,7 @@ from datetime import date
 
 import anthropic
 
+from knowledge import load_knowledge_text
 from prompts import SYSTEM_PROMPT
 from tools import TOOLS
 
@@ -31,6 +32,21 @@ MODEL = os.environ.get("CALL_CENTER_MODEL", "claude-opus-5")
 EFFORT = os.environ.get("CALL_CENTER_EFFORT", "medium")
 MAX_TOKENS = 16000
 MAX_PAUSE_RESTARTS = 5
+
+
+def build_system_blocks() -> list[dict]:
+    """System prompt plus the optional knowledge base, with the prompt-cache
+    breakpoint on the last block so the whole prefix is cached. Built once
+    at startup and kept byte-stable for the life of the process."""
+    blocks = [{"type": "text", "text": SYSTEM_PROMPT}]
+    knowledge = load_knowledge_text()
+    if knowledge:
+        blocks.append({"type": "text", "text": knowledge})
+    blocks[-1]["cache_control"] = {"type": "ephemeral"}
+    return blocks
+
+
+SYSTEM_BLOCKS = build_system_blocks()
 
 
 class CallCenterAgent:
@@ -58,11 +74,7 @@ class CallCenterAgent:
                 max_tokens=MAX_TOKENS,
                 thinking={"type": "adaptive"},
                 output_config={"effort": EFFORT},
-                system=[{
-                    "type": "text",
-                    "text": SYSTEM_PROMPT,
-                    "cache_control": {"type": "ephemeral"},
-                }],
+                system=SYSTEM_BLOCKS,
                 tools=TOOLS,
                 messages=self.messages,
             )
@@ -131,7 +143,8 @@ def run_demo() -> None:
     agent = CallCenterAgent()
     turns = [
         _call_context(),
-        "Hi, I'd like to get an oil change for my truck. My number is 555-123-0003.",
+        "Hi - quick question first: are you open Saturdays, and do you have a shuttle?",
+        "Great. I'd like to get an oil change for my truck. My number is 555-123-0003.",
         "Yes, this is Elena Vasquez.",
         "What do you have early next week, mornings if possible?",
         "The first morning slot works. And yes, please take care of that recall at the same time.",

@@ -16,6 +16,9 @@ The agent can:
 - **Check repair status** for vehicles currently in the shop
 - **Escalate to a human advisor** for disputes, complaints, safety issues,
   or anything outside its tools
+- **Answer from your own documents** — drop files into `knowledge/`
+  (hours, policies, promotions, FAQs) and the agent uses them as
+  authoritative reference material
 
 ## Quick start
 
@@ -50,6 +53,10 @@ tools.py        Fourteen @beta_tool functions. The SDK generates JSON schemas
                 the CRM client.
 crm.py          The CRM client layer: RestCRM (real HTTP API, selected when
                 CRM_API_BASE_URL is set) and MockCRM (in-memory default).
+knowledge.py    Loads reference documents from knowledge/ into a cached
+                system block at startup (.md/.txt/.csv/.json/.pdf).
+knowledge/      Your reference documents. Ships with a sample dealership
+                info sheet (hours, policies, promotions, FAQ).
 prompts.py      The system prompt: call-handling procedure, identity
                 verification, recall policy, lead capture with consent,
                 escalation rules, phone style.
@@ -72,6 +79,37 @@ iteration ends when Claude has a final spoken reply for the caller.
 | `CRM_API_BASE_URL` | — (mock CRM) | Base URL of your CRM's REST API; setting it switches the agent from the mock to the live CRM |
 | `CRM_API_KEY` | — | Bearer token sent as `Authorization: Bearer <key>` on CRM requests |
 | `CRM_TIMEOUT_SECONDS` | `10` | CRM HTTP request timeout |
+| `KNOWLEDGE_DIR` | `./knowledge` | Directory of reference documents to load at startup |
+| `KNOWLEDGE_MAX_CHARS_PER_FILE` | `100000` | Per-file size cap (larger files are truncated with a marker) |
+| `KNOWLEDGE_MAX_CHARS_TOTAL` | `400000` | Total knowledge size cap (later files are skipped) |
+
+## Feeding the agent knowledge files
+
+Put reference documents in `knowledge/` (or point `KNOWLEDGE_DIR`
+elsewhere) and restart the agent — no code changes:
+
+- **Formats:** `.md`, `.txt`, `.csv`, `.json` (read as text) and `.pdf`
+  (text extracted with pypdf). Other extensions are ignored.
+- **How it's used:** files are concatenated (sorted by name, wrapped in
+  `<document name="...">` tags) into a system block after the agent's
+  instructions. The prompt tells the agent these documents are
+  authoritative for general questions — hours, policies, promotions —
+  while account-specific facts still come only from the tools, and to
+  escalate rather than guess when neither covers a question.
+- **Cost:** the knowledge block sits under the prompt-cache breakpoint,
+  so after the first turn of a call it is read from cache at ~10% of the
+  normal input price. Keep it byte-stable while the process runs; edits
+  apply on restart.
+- **Scale:** size caps (see configuration) keep the context sane. If your
+  knowledge base outgrows a few hundred KB of text, switch to retrieval:
+  chunk the documents into a vector store and expose a `search_knowledge`
+  tool instead of inlining — the tool pattern in `tools.py` carries over
+  directly.
+
+A sample `knowledge/dealership_info.md` ships with hours, transportation
+policies, financing options, and current promotions; the demo call's
+first question ("are you open Saturdays, do you have a shuttle?") is
+answered from it.
 
 ## CRM integration
 
