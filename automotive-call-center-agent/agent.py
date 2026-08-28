@@ -135,6 +135,9 @@ def run_demo() -> None:
         "Yes, this is Elena Vasquez.",
         "What do you have early next week, mornings if possible?",
         "The first morning slot works. And yes, please take care of that recall at the same time.",
+        "One more thing - I'm thinking about trading this truck in for the new Lightning. "
+        "Can someone from sales call me about that?",
+        "Yes, same number is fine, and you can note I'd want to keep my trade-in value in mind. Go ahead.",
     ]
     for turn in turns:
         print(f"Caller: {turn}\n")

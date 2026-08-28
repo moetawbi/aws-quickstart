@@ -6,7 +6,9 @@ Anthropic Python SDK's tool runner driving the agentic loop.
 
 The agent can:
 
-- **Identify callers** by phone number against the CRM
+- **Identify callers and fetch customer details** from the CRM API
+- **Create sales leads in the CRM** (new/used vehicle, test drive,
+  trade-in, service contract) with the caller's consent, and check lead status
 - **Look up vehicles** — year/make/model, mileage, warranty status
 - **Check open safety recalls** (proactively, on every vehicle lookup)
 - **Quote service pricing** from the dealership's service menu
@@ -42,14 +44,18 @@ Alex:   Thanks — I have Elena Vasquez with a 2022 Ford F-150, is that right?
 agent.py        The call loop. One CallCenterAgent per phone call; mirrors
                 conversation history (the API is stateless) and restarts the
                 tool runner across turns, handling pause_turn and refusals.
-tools.py        Eleven @beta_tool functions. The SDK generates JSON schemas
+tools.py        Fourteen @beta_tool functions. The SDK generates JSON schemas
                 from the type hints + docstrings and executes calls for the
-                tool runner.
+                tool runner. Customer lookup and lead creation route through
+                the CRM client.
+crm.py          The CRM client layer: RestCRM (real HTTP API, selected when
+                CRM_API_BASE_URL is set) and MockCRM (in-memory default).
 prompts.py      The system prompt: call-handling procedure, identity
-                verification, recall policy, escalation rules, phone style.
-data_store.py   Mock CRM/DMS/scheduling/recall data. The integration seam:
-                replace these dicts and helpers with calls to your real
-                dealership management system.
+                verification, recall policy, lead capture with consent,
+                escalation rules, phone style.
+data_store.py   Mock DMS/scheduling/recall data, plus the MockCRM's backing
+                store. The integration seam for non-CRM systems: replace
+                these dicts and helpers with your real DMS/scheduler.
 ```
 
 The agentic loop is `client.beta.messages.tool_runner(...)`: Claude decides
@@ -63,6 +69,48 @@ iteration ends when Claude has a final spoken reply for the caller.
 | `ANTHROPIC_API_KEY` | — | API credential (or use an `ant auth login` profile) |
 | `CALL_CENTER_MODEL` | `claude-opus-5` | Claude model to use |
 | `CALL_CENTER_EFFORT` | `medium` | Thinking effort: `low`–`max`. `low` for fastest responses, `high`+ for harder reasoning |
+| `CRM_API_BASE_URL` | — (mock CRM) | Base URL of your CRM's REST API; setting it switches the agent from the mock to the live CRM |
+| `CRM_API_KEY` | — | Bearer token sent as `Authorization: Bearer <key>` on CRM requests |
+| `CRM_TIMEOUT_SECONDS` | `10` | CRM HTTP request timeout |
+
+## CRM integration
+
+`crm.py` defines one small interface with two backends. With no
+configuration you get `MockCRM` (in-memory, for local dev). Set
+`CRM_API_BASE_URL` (+ `CRM_API_KEY`) and the same tools hit your real CRM
+over REST. The expected endpoint contract:
+
+| Method & path | Purpose |
+|---|---|
+| `GET  /customers?phone={digits}` | Search customers by phone (a bare list, or a wrapper object keyed `customers`, `data`, `results`, or `items`, is accepted) |
+| `GET  /customers/{customer_id}` | Fetch one customer record |
+| `POST /leads` | Create a lead (JSON body below) |
+| `GET  /leads/{lead_id}` | Fetch one lead |
+
+Lead payload the agent POSTs:
+
+```json
+{
+  "name": "Elena Vasquez",
+  "phone": "+15551230003",
+  "lead_type": "trade_in",
+  "interest": "Trade 2022 F-150 Lariat for F-150 Lightning",
+  "email": "",
+  "customer_id": "C-1003",
+  "notes": "Wants trade-in value discussed on the call",
+  "source": "call_center"
+}
+```
+
+If your CRM's API differs (Salesforce, HubSpot, DealerSocket,
+VinSolutions, ...), adapt `RestCRM`'s four methods — the tools and prompt
+don't change. CRM failures surface as `{"error": ...}` results, which the
+agent explains gracefully and, when appropriate, escalates instead of
+losing the caller.
+
+The agent only creates a lead after confirming the details and getting
+the caller's explicit consent to be contacted, and it reads back the
+lead ID as a reference.
 
 Cost/latency notes baked in:
 

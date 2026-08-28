@@ -18,6 +18,10 @@ from datetime import date, datetime, timedelta
 from anthropic import beta_tool
 
 import data_store as db
+from crm import LEAD_TYPES, get_crm
+
+# CRM backend: RestCRM when CRM_API_BASE_URL is set, MockCRM otherwise.
+CRM = get_crm()
 
 
 def _json(payload) -> str:
@@ -26,18 +30,22 @@ def _json(payload) -> str:
 
 @beta_tool
 def lookup_customer(phone: str) -> str:
-    """Look up a customer record by phone number.
+    """Look up a customer record in the CRM by phone number.
 
     Args:
         phone: The caller's phone number, e.g. "+15551230001" or "555-123-0001".
     """
-    digits = "".join(c for c in phone if c.isdigit())
-    if len(digits) < 7:
-        return _json({"error": "Phone number is too short to search on."})
-    for key, customer in db.CUSTOMERS.items():
-        if "".join(c for c in key if c.isdigit()).endswith(digits[-10:]):
-            return _json(customer)
-    return _json({"error": f"No customer found for phone {phone}."})
+    return _json(CRM.find_customer_by_phone(phone))
+
+
+@beta_tool
+def get_customer_details(customer_id: str) -> str:
+    """Fetch a customer's full CRM record (contact info, owned vehicles) by ID.
+
+    Args:
+        customer_id: The customer's CRM ID, e.g. "C-1001".
+    """
+    return _json(CRM.get_customer(customer_id))
 
 
 @beta_tool
@@ -223,9 +231,69 @@ def escalate_to_human(customer_id: str, reason: str, priority: str = "normal") -
     return _json({"escalated": True, "ticket": ticket})
 
 
+@beta_tool
+def create_lead(
+    name: str,
+    phone: str,
+    lead_type: str,
+    interest: str,
+    email: str = "",
+    customer_id: str = "",
+    notes: str = "",
+) -> str:
+    """Create a sales/service lead in the CRM so the right team follows up.
+
+    Use when a caller expresses buying interest (new/used vehicle, test
+    drive, trade-in, service contract) - whether or not they are an
+    existing customer. Always confirm the details with the caller and get
+    their consent to be contacted before creating the lead.
+
+    Args:
+        name: The caller's full name.
+        phone: The caller's callback phone number.
+        lead_type: One of "new_vehicle", "used_vehicle", "trade_in",
+            "test_drive", "service_contract", or "other".
+        interest: What they are interested in, e.g. "2026 F-150 Lariat, financing".
+        email: The caller's email address, if they offered one.
+        customer_id: The existing CRM customer ID, if the caller was identified.
+        notes: Anything else useful for the sales team (timeline, budget, trade-in vehicle).
+    """
+    if lead_type not in LEAD_TYPES:
+        return _json({"error": f"Invalid lead_type '{lead_type}'. Use one of: {', '.join(LEAD_TYPES)}."})
+    if not name.strip() or not phone.strip() or not interest.strip():
+        return _json({"error": "name, phone, and interest are all required to create a lead."})
+    lead = {
+        "name": name.strip(),
+        "phone": phone.strip(),
+        "lead_type": lead_type,
+        "interest": interest.strip(),
+        "email": email.strip(),
+        "customer_id": customer_id.strip(),
+        "notes": notes.strip(),
+        "source": "call_center",
+    }
+    result = CRM.create_lead(lead)
+    if "error" in result:
+        return _json(result)
+    return _json({"created": True, "lead": result})
+
+
+@beta_tool
+def get_lead(lead_id: str) -> str:
+    """Fetch a lead from the CRM to check its status.
+
+    Args:
+        lead_id: The lead's CRM ID, e.g. "L-3001".
+    """
+    return _json(CRM.get_lead(lead_id))
+
+
 # The full tool surface handed to the tool runner.
 TOOLS = [
     lookup_customer,
+    get_customer_details,
+    create_lead,
+    get_lead,
     get_vehicle,
     get_service_history,
     check_recalls,

@@ -174,6 +174,10 @@ REPAIR_ORDERS = {
 ESCALATIONS: list[dict] = []
 _escalation_counter = itertools.count(9001)
 
+# Sales/service leads created by the call center (mock CRM backend).
+LEADS: dict[str, dict] = {}
+_lead_counter = itertools.count(3001)
+
 _SLOT_TIMES = ["08:00", "09:30", "11:00", "13:00", "14:30", "16:00"]
 
 
@@ -195,3 +199,7 @@ def next_appointment_id() -> str:
 
 def next_escalation_id() -> str:
     return f"E-{next(_escalation_counter)}"
+
+
+def next_lead_id() -> str:
+    return f"L-{next(_lead_counter)}"
