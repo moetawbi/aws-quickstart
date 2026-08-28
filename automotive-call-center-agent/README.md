@@ -16,6 +16,9 @@ The agent can:
 - **Check repair status** for vehicles currently in the shop
 - **Escalate to a human advisor** for disputes, complaints, safety issues,
   or anything outside its tools
+- **Answer customers on Trengo** — a worker watches open Trengo tickets
+  and replies on the ticket (WhatsApp, chat, email) using the same agent
+  and tools
 - **Answer from your own documents** — drop files into `knowledge/`
   (hours, policies, promotions, FAQs) and the agent uses them as
   authoritative reference material
@@ -65,6 +68,10 @@ retrieval.py    Chunks files in manuals/ (heading-aware for text, per-page
                 tool queries the index on demand.
 manuals/        Full service/owner manuals - any size. Ships with an
                 F-150 owner manual excerpt.
+trengo.py       Trengo REST client (tickets, messages, replies) with
+                tolerant message-shape parsing.
+trengo_worker.py Polls open Trengo tickets and answers new customer
+                messages with the agent; deduplicates and persists state.
 prompts.py      The system prompt: call-handling procedure, identity
                 verification, recall policy, lead capture with consent,
                 escalation rules, phone style.
@@ -91,6 +98,11 @@ iteration ends when Claude has a final spoken reply for the caller.
 | `KNOWLEDGE_MAX_CHARS_PER_FILE` | `100000` | Per-file size cap (larger files are truncated with a marker) |
 | `KNOWLEDGE_MAX_CHARS_TOTAL` | `400000` | Total knowledge size cap (later files are skipped) |
 | `MANUALS_DIR` | `./manuals` | Directory of service manuals to chunk and index for search |
+| `TRENGO_API_KEY` | — | Trengo API token (Settings → API) for the Trengo worker |
+| `TRENGO_BASE_URL` | `https://app.trengo.com/api/v2` | Trengo API base URL |
+| `TRENGO_POLL_SECONDS` | `20` | How often the worker polls for new customer messages |
+| `TRENGO_TICKET_STATUS` | `OPEN` | Which tickets the worker watches |
+| `TRENGO_STATE_FILE` | `./.trengo_state.json` | Where replied-message ids persist across restarts |
 
 ## Feeding the agent knowledge files
 
@@ -147,6 +159,44 @@ A sample `manuals/f150_2022_owner_manual_excerpt.md` ships with tire and
 torque specs, fluid capacities, maintenance schedules, warning lamp
 meanings, and towing limits; the demo call's lug-nut-torque question is
 answered from it.
+
+## Answering customers on Trengo
+
+`trengo_worker.py` connects the agent to your [Trengo](https://trengo.com)
+inbox so it answers tickets (WhatsApp, live chat, email) with the same
+tools and guardrails as the phone flow:
+
+```bash
+export ANTHROPIC_API_KEY=...
+export TRENGO_API_KEY=...      # Trengo Settings → API
+python trengo_worker.py        # watch tickets continuously
+python trengo_worker.py --once # single cycle, e.g. from cron
+```
+
+How it works:
+
+- The worker polls open tickets and answers a ticket only when its
+  **latest** message is from the customer — it never replies to itself,
+  and the id of the last answered message is persisted to a state file so
+  restarts don't double-reply.
+- Each ticket gets its own agent session. The first turn carries the
+  channel type, the customer's name/phone from the ticket, and a replay
+  of the ticket's earlier conversation, so the agent picks up mid-thread
+  correctly; later turns feed just the new message.
+- The agent is told it's a written channel: reply in the customer's
+  language, stay brief, no re-greeting every message. Identity is still
+  verified via the CRM before account details are shared, and escalations
+  still open advisor tickets.
+- Internal notes are ignored; agent errors are logged and retried on the
+  next cycle without marking the message answered.
+
+Polling needs no public URL. To go push-based instead, point a Trengo
+webhook for inbound messages at a small HTTP endpoint that calls
+`TrengoWorker.handle_ticket(ticket)` — the per-ticket logic is identical.
+
+Endpoint paths and message-field parsing live in `trengo.py`; if your
+Trengo account's API differs from the v2 shapes used there (see
+developers.trengo.com), that's the one file to adjust.
 
 ## CRM integration
 
