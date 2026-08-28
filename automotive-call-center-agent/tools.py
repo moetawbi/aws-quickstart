@@ -18,6 +18,7 @@ from datetime import date, datetime, timedelta
 from anthropic import beta_tool
 
 import data_store as db
+import retrieval
 from crm import LEAD_TYPES, get_crm
 
 # CRM backend: RestCRM when CRM_API_BASE_URL is set, MockCRM otherwise.
@@ -288,12 +289,46 @@ def get_lead(lead_id: str) -> str:
     return _json(CRM.get_lead(lead_id))
 
 
+@beta_tool
+def search_service_manuals(query: str, max_results: int = 4) -> str:
+    """Search the dealership's service and owner manuals for technical
+    information: fluid capacities and specs, torque values, maintenance
+    schedules, warning lamp meanings, towing limits, feature operation.
+
+    Returns the most relevant manual passages with their source file and
+    section. Quote specs exactly as written; if nothing relevant comes
+    back, say the manuals don't cover it rather than guessing.
+
+    Args:
+        query: What to look for, with specifics - vehicle, system, and
+            measurement, e.g. "F-150 lug nut torque" or "EcoBoost coolant capacity".
+        max_results: How many passages to return (1-8, default 4).
+    """
+    index = retrieval.get_index()
+    if not index.chunks:
+        return _json({"error": "No service manuals are loaded.", "results": []})
+    max_results = max(1, min(max_results, 8))
+    results = [
+        {
+            "source": chunk.source,
+            "section": chunk.section,
+            "relevance": round(score, 2),
+            "text": chunk.text,
+        }
+        for score, chunk in index.search(query, k=max_results)
+    ]
+    if not results:
+        return _json({"results": [], "note": "No manual passages matched this query."})
+    return _json({"results": results})
+
+
 # The full tool surface handed to the tool runner.
 TOOLS = [
     lookup_customer,
     get_customer_details,
     create_lead,
     get_lead,
+    search_service_manuals,
     get_vehicle,
     get_service_history,
     check_recalls,

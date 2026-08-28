@@ -19,6 +19,9 @@ The agent can:
 - **Answer from your own documents** — drop files into `knowledge/`
   (hours, policies, promotions, FAQs) and the agent uses them as
   authoritative reference material
+- **Search full service manuals** — files in `manuals/` are chunked and
+  BM25-indexed at startup; the agent searches them on demand for specs,
+  maintenance schedules, warning lamps, and towing limits
 
 ## Quick start
 
@@ -47,7 +50,7 @@ Alex:   Thanks — I have Elena Vasquez with a 2022 Ford F-150, is that right?
 agent.py        The call loop. One CallCenterAgent per phone call; mirrors
                 conversation history (the API is stateless) and restarts the
                 tool runner across turns, handling pause_turn and refusals.
-tools.py        Fourteen @beta_tool functions. The SDK generates JSON schemas
+tools.py        Fifteen @beta_tool functions. The SDK generates JSON schemas
                 from the type hints + docstrings and executes calls for the
                 tool runner. Customer lookup and lead creation route through
                 the CRM client.
@@ -57,6 +60,11 @@ knowledge.py    Loads reference documents from knowledge/ into a cached
                 system block at startup (.md/.txt/.csv/.json/.pdf).
 knowledge/      Your reference documents. Ships with a sample dealership
                 info sheet (hours, policies, promotions, FAQ).
+retrieval.py    Chunks files in manuals/ (heading-aware for text, per-page
+                for PDFs) and BM25-indexes them; the search_service_manuals
+                tool queries the index on demand.
+manuals/        Full service/owner manuals - any size. Ships with an
+                F-150 owner manual excerpt.
 prompts.py      The system prompt: call-handling procedure, identity
                 verification, recall policy, lead capture with consent,
                 escalation rules, phone style.
@@ -82,6 +90,7 @@ iteration ends when Claude has a final spoken reply for the caller.
 | `KNOWLEDGE_DIR` | `./knowledge` | Directory of reference documents to load at startup |
 | `KNOWLEDGE_MAX_CHARS_PER_FILE` | `100000` | Per-file size cap (larger files are truncated with a marker) |
 | `KNOWLEDGE_MAX_CHARS_TOTAL` | `400000` | Total knowledge size cap (later files are skipped) |
+| `MANUALS_DIR` | `./manuals` | Directory of service manuals to chunk and index for search |
 
 ## Feeding the agent knowledge files
 
@@ -100,15 +109,43 @@ elsewhere) and restart the agent — no code changes:
   so after the first turn of a call it is read from cache at ~10% of the
   normal input price. Keep it byte-stable while the process runs; edits
   apply on restart.
-- **Scale:** size caps (see configuration) keep the context sane. If your
-  knowledge base outgrows a few hundred KB of text, switch to retrieval:
-  chunk the documents into a vector store and expose a `search_knowledge`
-  tool instead of inlining — the tool pattern in `tools.py` carries over
-  directly.
+- **Scale:** size caps (see configuration) keep the context sane. For
+  documents too large to inline — full service manuals — use `manuals/`
+  and retrieval instead (next section).
 
 A sample `knowledge/dealership_info.md` ships with hours, transportation
 policies, financing options, and current promotions; the demo call's
 first question ("are you open Saturdays, do you have a shuttle?") is
+answered from it.
+
+## Full service manuals (retrieval)
+
+Manuals don't fit in a prompt, so `manuals/` works differently from
+`knowledge/`: at startup `retrieval.py` splits each file into ~1600-char
+chunks (heading-aware for Markdown/text, per-page for PDFs, with overlap
+so boundary-straddling facts stay findable) and builds a BM25 index over
+them. The agent gets a `search_service_manuals` tool and pulls in only
+the top few matching passages per question — a 900-page PDF costs nothing
+until a caller asks about torque specs.
+
+- **Formats:** same as `knowledge/` — `.md`, `.txt`, `.csv`, `.json`,
+  and `.pdf` (per-page via pypdf).
+- **Prompting:** the agent quotes specs exactly, names the source
+  section, says so when the manuals don't cover a question, and gives
+  lookups rather than repair walk-throughs — safety-critical work is
+  redirected to a service visit.
+- **No infrastructure:** BM25 is pure Python in-process — no vector
+  database, embedding API, or network calls, and lexical matching fits
+  manual lookups ("lug nut torque", "coolant capacity") well. If you
+  later want semantic search (paraphrased questions across huge corpora),
+  swap `BM25Index` for an embedding store (e.g. Voyage AI + a vector DB);
+  the chunker, tool, and prompt are unchanged.
+- **Indexing cost:** in-memory and fast (tens of MB of text index in
+  seconds at startup); re-index by restarting after manual changes.
+
+A sample `manuals/f150_2022_owner_manual_excerpt.md` ships with tire and
+torque specs, fluid capacities, maintenance schedules, warning lamp
+meanings, and towing limits; the demo call's lug-nut-torque question is
 answered from it.
 
 ## CRM integration
