@@ -19,6 +19,9 @@ The agent can:
 - **Answer customers on Trengo** — a worker watches open Trengo tickets
   and replies on the ticket (WhatsApp, chat, email) using the same agent
   and tools
+- **Learn and remember across conversations** — a persistent memory the
+  agent curates itself: customer preferences, recurring issues, and
+  corrections learned on one ticket are available on every later call
 - **Answer from your own documents** — drop files into `knowledge/`
   (hours, policies, promotions, FAQs) and the agent uses them as
   authoritative reference material
@@ -74,6 +77,9 @@ trengo_worker.py Polls open Trengo tickets and answers new customer
                 messages with the agent; deduplicates and persists state.
 trengo_webhook.py Webhook listener - Trengo pushes inbound-message events
                 to this HTTP server for instant replies (same dedupe/state).
+memory_store.py Persistent agent memory (Anthropic memory_20250818 tool,
+                filesystem backend under memory/): path-confined, size-
+                capped, curated by the agent itself.
 prompts.py      The system prompt: call-handling procedure, identity
                 verification, recall policy, lead capture with consent,
                 escalation rules, phone style.
@@ -109,6 +115,35 @@ iteration ends when Claude has a final spoken reply for the caller.
 | `TRENGO_WEBHOOK_PORT` | `8080` | Port the webhook listener binds |
 | `TRENGO_WEBHOOK_PATH` | `/webhooks/trengo` | URL path the listener accepts events on |
 | `TRENGO_WEBHOOK_ALLOW_INSECURE` | — | Set to `1` to run the listener without a secret (local dev only) |
+| `MEMORY_DIR` | `./memory` | Where the agent's persistent memory files live |
+| `MEMORY_MAX_FILE_BYTES` | `100000` | Per-memory-file size cap |
+| `MEMORY_MAX_TOTAL_BYTES` | `2000000` | Total memory size cap |
+| `MEMORY_MAX_FILES` | `200` | Maximum number of memory files |
+
+## Memory: learning from every conversation
+
+The agent carries Anthropic's memory tool (`memory_20250818`) backed by
+plain files under `memory/` (or `MEMORY_DIR`). Claude decides for itself
+what is worth keeping and manages the files with view/create/edit/delete
+commands — no pipeline to run:
+
+- **Learns from ongoing Trengo conversations and phone calls alike:** the
+  prompt tells it to check memory once it knows who it's talking to or
+  what the topic is, and to record durable learnings as it goes —
+  customer preferences and corrections (keyed by customer ID), recurring
+  vehicle issues, questions it couldn't answer.
+- **Remembers across everything:** one shared store spans channels,
+  worker processes, and restarts. What it learns on a WhatsApp ticket
+  today it uses on a phone call tomorrow. Inspect or edit the notes any
+  time — they're just Markdown files in `memory/`.
+- **Curated, not hoarded:** the prompt instructs it to update and
+  consolidate instead of appending duplicates, and to treat the CRM,
+  scheduler, and manuals as authoritative over its own notes.
+- **Guardrails:** file access is hard-confined to the memory directory
+  (traversal attempts are refused), size caps prevent unbounded growth,
+  payment data and passwords are never to be stored, and memory is
+  internal — the agent uses it naturally but doesn't recite notes to
+  customers.
 
 ## Feeding the agent knowledge files
 

@@ -23,8 +23,13 @@ from datetime import date
 import anthropic
 
 from knowledge import load_knowledge_text
+from memory_store import FileMemoryTool
 from prompts import SYSTEM_PROMPT
 from tools import TOOLS
+
+# One shared memory store: what the agent learns in any conversation
+# (phone or Trengo) is available to every later conversation.
+MEMORY = FileMemoryTool()
 
 MODEL = os.environ.get("CALL_CENTER_MODEL", "claude-opus-5")
 # Call centers are latency-sensitive; "medium" balances quality and speed.
@@ -75,7 +80,7 @@ class CallCenterAgent:
                 thinking={"type": "adaptive"},
                 output_config={"effort": EFFORT},
                 system=SYSTEM_BLOCKS,
-                tools=TOOLS,
+                tools=[*TOOLS, MEMORY],
                 messages=self.messages,
             )
             for message in runner:
