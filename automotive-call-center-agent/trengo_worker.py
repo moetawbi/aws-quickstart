@@ -53,9 +53,11 @@ def _log(text: str) -> None:
 
 class TrengoWorker:
     def __init__(self, client: trengo.TrengoClient | None = None,
-                 agent_factory=CallCenterAgent, state_path: Path | None = None):
+                 agent_factory=CallCenterAgent, state_path: Path | None = None,
+                 dry_run: bool = False):
         self.client = client or trengo.TrengoClient()
         self.agent_factory = agent_factory
+        self.dry_run = dry_run  # never post replies or update state; log instead
         self.state_path = state_path or default_state_path()
         self.agents: dict[str, CallCenterAgent] = {}  # live sessions, keyed by ticket id
         self.replied: dict[str, int] = self._load_state()
@@ -140,6 +142,10 @@ class TrengoWorker:
         if not reply.strip():
             _log(f"ticket {ticket_id}: agent produced no reply text")
             return "error"
+
+        if self.dry_run:
+            _log(f"ticket {ticket_id}: DRY RUN - would reply: {reply[:200]}")
+            return "replied"
 
         result = self.client.send_message(ticket_id, reply)
         if isinstance(result, dict) and "error" in result:

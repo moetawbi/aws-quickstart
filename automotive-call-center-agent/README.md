@@ -241,8 +241,39 @@ belt-and-braces setup is safe: run the webhook listener as primary and a
 cron `python trengo_worker.py --once` every few minutes as a safety net
 for missed deliveries — nothing gets answered twice.
 
-Endpoint paths and message-field parsing live in `trengo.py`; if your
-Trengo account's API differs from the v2 shapes used there (see
+### Verifying against your real Trengo account
+
+Before going live, run the verifier wherever `app.trengo.com` is
+reachable — it checks every assumption the integration makes against
+your actual account and prints a PASS/WARN/FAIL checklist:
+
+```bash
+export TRENGO_API_KEY=...                  # Trengo Settings → API
+python trengo_verify.py                    # read-only checks
+python trengo_verify.py --webhook          # + local webhook dry run (posts nothing)
+python trengo_verify.py --send-test 12345  # + posts ONE labeled test message
+```
+
+What it verifies: authentication; the ticket-list envelope and
+pagination; ticket/contact/channel parsing on your real tickets; the
+single-ticket endpoint the webhook path uses; that your account's real
+message shapes are classifiable as inbound/outbound (unclassifiable
+shapes are reported by field names only — message content is never
+printed); and which webhooks your account has configured. With
+`--webhook` it boots the actual listener locally, feeds it a synthetic
+event for one of your real tickets, and proves the full path — auth →
+queue → re-fetch through your real API → reply/skip decision — in dry-run
+mode with a stub agent, so nothing is posted and no Anthropic key is
+needed. `--send-test` is the only write: it posts one clearly-labeled
+test message, confirms it's visible via the API, and — critically —
+confirms our parser classifies it as OUTBOUND, the property that
+guarantees the agent never answers itself.
+
+Exit code 0 means no failures; the script then prints the steps for the
+final live test (webhook listener + a real WhatsApp/chat message).
+
+Endpoint paths and message-field parsing live in `trengo.py`; if the
+verifier flags a mismatch with your account's API shapes (see
 developers.trengo.com), that's the one file to adjust.
 
 ## CRM integration
