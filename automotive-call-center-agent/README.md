@@ -80,6 +80,12 @@ trengo_webhook.py Webhook listener - Trengo pushes inbound-message events
 memory_store.py Persistent agent memory (Anthropic memory_20250818 tool,
                 filesystem backend under memory/): path-confined, size-
                 capped, curated by the agent itself.
+admin_api.py    Localhost HTTP API for managing knowledge/, manuals/, and
+                memory/ from another backend (e.g. your CRM admin) - list,
+                upload, download, delete, status; changes apply without
+                restarts. See DEPLOYMENT.md.
+DEPLOYMENT.md   Installing on a server (systemd, reverse proxy, cron
+                safety net) and wiring the Admin API into a CRM backend.
 prompts.py      The system prompt: call-handling procedure, identity
                 verification, recall policy, lead capture with consent,
                 escalation rules, phone style.

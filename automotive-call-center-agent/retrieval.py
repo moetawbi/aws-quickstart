@@ -203,14 +203,31 @@ class BM25Index:
 
 
 _index: BM25Index | None = None
+_signature: tuple | None = None
+
+
+def _dir_signature() -> tuple:
+    directory = manuals_dir()
+    if not directory.is_dir():
+        return ()
+    entries = []
+    for path in sorted(directory.iterdir()):
+        if path.is_file() and path.suffix.lower() in {".pdf", ".md", ".txt", ".csv", ".json"}:
+            stat = path.stat()
+            entries.append((path.name, stat.st_mtime_ns, stat.st_size))
+    return tuple(entries)
 
 
 def get_index() -> BM25Index:
-    """Build the index on first use and reuse it for the process lifetime."""
-    global _index
-    if _index is None:
+    """Build the index on first use and rebuild automatically whenever the
+    manuals directory changes on disk (e.g. a manual uploaded through the
+    admin API) - no restart or signaling needed."""
+    global _index, _signature
+    signature = _dir_signature()
+    if _index is None or signature != _signature:
         chunks = load_chunks()
         _index = BM25Index(chunks)
+        _signature = signature
         if chunks:
             sources = sorted({c.source for c in chunks})
             print(f"[manuals] indexed {len(chunks)} chunks from: {', '.join(sources)}", file=sys.stderr)
@@ -218,6 +235,7 @@ def get_index() -> BM25Index:
 
 
 def reset_index() -> None:
-    """Drop the cached index (manuals changed on disk, or tests)."""
-    global _index
+    """Drop the cached index (tests)."""
+    global _index, _signature
     _index = None
+    _signature = None

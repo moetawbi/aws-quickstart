@@ -22,7 +22,7 @@ from datetime import date
 
 import anthropic
 
-from knowledge import load_knowledge_text
+from knowledge import get_knowledge_text
 from memory_store import FileMemoryTool
 from prompts import SYSTEM_PROMPT
 from tools import TOOLS
@@ -41,17 +41,17 @@ MAX_PAUSE_RESTARTS = 5
 
 def build_system_blocks() -> list[dict]:
     """System prompt plus the optional knowledge base, with the prompt-cache
-    breakpoint on the last block so the whole prefix is cached. Built once
-    at startup and kept byte-stable for the life of the process."""
+    breakpoint on the last block so the whole prefix is cached. Each new
+    conversation snapshots the current knowledge (get_knowledge_text reloads
+    only when the directory changes), so knowledge edits - e.g. uploads via
+    the admin API - apply to new conversations without a restart while
+    ongoing conversations keep a byte-stable, cacheable prefix."""
     blocks = [{"type": "text", "text": SYSTEM_PROMPT}]
-    knowledge = load_knowledge_text()
+    knowledge = get_knowledge_text()
     if knowledge:
         blocks.append({"type": "text", "text": knowledge})
     blocks[-1]["cache_control"] = {"type": "ephemeral"}
     return blocks
-
-
-SYSTEM_BLOCKS = build_system_blocks()
 
 
 class CallCenterAgent:
@@ -65,6 +65,7 @@ class CallCenterAgent:
     def __init__(self, client: anthropic.Anthropic | None = None):
         self.client = client or anthropic.Anthropic()
         self.messages: list[dict] = []
+        self.system_blocks = build_system_blocks()  # per-conversation snapshot
 
     def send(self, user_input: str) -> str:
         self.messages.append({"role": "user", "content": user_input})
@@ -79,7 +80,7 @@ class CallCenterAgent:
                 max_tokens=MAX_TOKENS,
                 thinking={"type": "adaptive"},
                 output_config={"effort": EFFORT},
-                system=SYSTEM_BLOCKS,
+                system=self.system_blocks,
                 tools=[*TOOLS, MEMORY],
                 messages=self.messages,
             )

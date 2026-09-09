@@ -102,6 +102,34 @@ def load_documents() -> list[tuple[str, str]]:
     return documents
 
 
+def _dir_signature() -> tuple:
+    directory = knowledge_dir()
+    if not directory.is_dir():
+        return ()
+    entries = []
+    for path in sorted(directory.iterdir()):
+        if path.is_file() and path.suffix.lower() in SUPPORTED:
+            stat = path.stat()
+            entries.append((path.name, stat.st_mtime_ns, stat.st_size))
+    return tuple(entries)
+
+
+_cached_text: str | None = None
+_cached_signature: tuple | None = None
+
+
+def get_knowledge_text() -> str:
+    """Cached accessor: reloads only when the knowledge directory changes
+    on disk, so files added/edited/removed (e.g. via the admin API) take
+    effect on the next new conversation without a restart."""
+    global _cached_text, _cached_signature
+    signature = _dir_signature()
+    if _cached_text is None or signature != _cached_signature:
+        _cached_text = load_knowledge_text()
+        _cached_signature = signature
+    return _cached_text
+
+
 def load_knowledge_text() -> str:
     """The knowledge base as one formatted string for a system block, or
     an empty string when there is nothing to load."""
