@@ -87,6 +87,26 @@ field. The agent reads the lead reference back to the customer.
 
 One lead with at least `lead_id` and `status`. `404` if unknown.
 
+### A5–A9. Vehicles, recalls and callbacks (added 2026-10-29)
+
+These replaced the demo data in `data_store.py` for `get_vehicle`,
+`get_service_history`, `check_recalls` and `escalate_to_human`, and replaced
+booking with `request_service_appointment`. `MockCRM` still answers them from
+`data_store.py` when `CRM_API_BASE_URL` is unset.
+
+| Endpoint | Tool | Notes |
+|---|---|---|
+| `GET {base}/vehicles/{vin}?customer_id=` | `get_vehicle` | warranty, maintenance plan, Ford Protect, last visit, next service km |
+| `GET {base}/vehicles/{vin}/service-history?customer_id=` | `get_service_history` | completed workshop visits, no prices |
+| `GET {base}/vehicles/{vin}/recalls` | `check_recalls` | `on_record` = flagged, repair status unknown |
+| `POST {base}/handovers` | `escalate_to_human` | opens a callback case for the CRM's case agents |
+| `POST {base}/service-requests` | `request_service_appointment` | a request the service team confirms — nothing is booked |
+
+Vehicle reads in a customer conversation need the identified `customer_id`
+and only return that customer's vehicles; a staff conversation (actor grant)
+may read any VIN. Handovers and requests need a `customer_id` or a callback
+`phone`.
+
 ### Acceptance (Part A)
 
 From the agent install (or any machine with this repo + Python):

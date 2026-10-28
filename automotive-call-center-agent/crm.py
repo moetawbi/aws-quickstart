@@ -11,6 +11,11 @@ Two interchangeable implementations of the same interface:
     - ``GET  {base}/customers/{customer_id}``  -> one customer record
     - ``POST {base}/leads``                    -> create a sales/service lead
     - ``GET  {base}/leads/{lead_id}``          -> one lead record
+    - ``GET  {base}/vehicles/{vin}``           -> vehicle profile (warranty, plan, last visit)
+    - ``GET  {base}/vehicles/{vin}/service-history`` -> completed workshop visits
+    - ``GET  {base}/vehicles/{vin}/recalls``   -> recall campaigns for the VIN
+    - ``POST {base}/handovers``                -> a callback case for a person
+    - ``POST {base}/service-requests``         -> a service appointment request
 
     Auth is a bearer token from ``CRM_API_KEY``
     (``Authorization: Bearer <key>``).
@@ -35,7 +40,8 @@ import data_store as db
 
 DEFAULT_TIMEOUT = float(os.environ.get("CRM_TIMEOUT_SECONDS", "10"))
 
-LEAD_TYPES = ("new_vehicle", "used_vehicle", "trade_in", "test_drive", "service_contract", "other")
+LEAD_TYPES = ("new_vehicle", "used_vehicle", "trade_in", "test_drive", "service_contract",
+              "accessories", "parts", "other")
 
 
 def _normalize_phone(phone: str) -> str:
@@ -70,6 +76,42 @@ class MockCRM:
         if lead is None:
             return {"error": f"No lead found with ID {lead_id}."}
         return dict(lead)
+
+    # -- vehicles & callbacks (demo data, same shapes as the real CRM) ---------
+
+    def get_vehicle(self, vin: str, customer_id: str = "") -> dict:
+        vehicle = db.VEHICLES.get(vin.strip().upper())
+        if vehicle is None:
+            return {"error": f"No vehicle found for VIN {vin}."}
+        warranty = vehicle.get("warranty") or {}
+        return {
+            "vin": vehicle["vin"], "make": vehicle["make"], "model": vehicle["model"], "year": vehicle["year"],
+            "warranty": {"ends_on": warranty.get("expires"),
+                         "state": "active" if warranty.get("active") else "expired"} if warranty else None,
+            "last_visit": {"on": None, "mileage_km": vehicle.get("mileage")},
+        }
+
+    def get_service_history(self, vin: str, customer_id: str = "") -> dict:
+        vin = vin.strip().upper()
+        visits = [{"work": v["service"], "completed_on": v["date"]} for v in db.SERVICE_HISTORY.get(vin, [])]
+        return {"vin": vin, "visits": visits, "count": len(visits)}
+
+    def check_recalls(self, vin: str) -> dict:
+        vin = vin.strip().upper()
+        recalls = [{"campaign": r["summary"], "code": r["recall_id"], "status": "open", "do_not_drive": False}
+                   for r in db.RECALLS.get(vin, [])]
+        return {"vin": vin, "recalls": recalls, "count": len(recalls)}
+
+    def create_handover(self, handover: dict) -> dict:
+        reference = db.next_escalation_id()
+        db.ESCALATIONS.append({"reference": reference, **handover})
+        return {"handed_over": True, "reference": reference, "priority": handover.get("priority", "normal")}
+
+    def create_service_request(self, request: dict) -> dict:
+        reference = db.next_escalation_id()
+        db.ESCALATIONS.append({"reference": reference, "type": "service_request", **request})
+        return {"requested": True, "reference": reference, "booked": False,
+                "next_step": "The service team will call the customer to confirm the slot."}
 
     # -- insurance -------------------------------------------------------------
     # There is no mock insurance book; these need the real CRM (the portfolio,
@@ -114,8 +156,6 @@ class RestCRM:
             )
         except requests.RequestException as exc:
             return {"error": f"CRM is unreachable ({exc.__class__.__name__})."}
-        if response.status_code == 404:
-            return {"error": "Not found in CRM."}
         if not response.ok:
             # The CRM explains refusals in its own words (a permission denial
             # names the user and the missing permission); pass that through
@@ -129,6 +169,8 @@ class RestCRM:
                 detail = ""
             if detail:
                 return {"error": detail}
+            if response.status_code == 404:
+                return {"error": "Not found in CRM."}
             return {"error": f"CRM returned HTTP {response.status_code}."}
         try:
             return response.json()
@@ -176,6 +218,34 @@ class RestCRM:
     def get_lead(self, lead_id: str) -> dict:
         payload = self._request("GET", f"/leads/{lead_id}")
         return payload if isinstance(payload, dict) else {"error": "Unexpected CRM response."}
+
+    # -- vehicles & callbacks --------------------------------------------------
+    # Reads are scoped by the CRM like insurance: a customer conversation must
+    # name the identified customer and only sees vehicles on that account.
+
+    @staticmethod
+    def _vin_path(vin: str) -> str:
+        return requests.utils.quote("".join(c for c in vin if c.isalnum()).upper(), safe="")
+
+    def _dict(self, payload) -> dict:
+        return payload if isinstance(payload, dict) else {"error": "Unexpected CRM response."}
+
+    def get_vehicle(self, vin: str, customer_id: str = "") -> dict:
+        params = {"customer_id": customer_id} if customer_id else None
+        return self._dict(self._request("GET", f"/vehicles/{self._vin_path(vin)}", params=params))
+
+    def get_service_history(self, vin: str, customer_id: str = "") -> dict:
+        params = {"customer_id": customer_id} if customer_id else None
+        return self._dict(self._request("GET", f"/vehicles/{self._vin_path(vin)}/service-history", params=params))
+
+    def check_recalls(self, vin: str) -> dict:
+        return self._dict(self._request("GET", f"/vehicles/{self._vin_path(vin)}/recalls"))
+
+    def create_handover(self, handover: dict) -> dict:
+        return self._dict(self._request("POST", "/handovers", json=handover))
+
+    def create_service_request(self, request: dict) -> dict:
+        return self._dict(self._request("POST", "/service-requests", json=request))
 
     # -- insurance (read-only) -------------------------------------------------
 

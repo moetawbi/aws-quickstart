@@ -7,19 +7,21 @@ and drives the execute-and-loop cycle via the tool runner.
 Every tool returns a JSON string so results are unambiguous for the model.
 Failures are returned as ``{"error": ...}`` payloads rather than raised,
 so the model can recover conversationally (ask the caller to re-spell a
-VIN, offer another time slot, etc.).
+VIN, hand over to a person, etc.).
+
+Every vehicle, recall, service-request and handover call goes through the
+CRM client (crm.py): the live CRM in production, the demo data in
+data_store.py only when no CRM is configured.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timedelta
 
 from anthropic import beta_tool
 
 import agent_context
 import catalogue
-import data_store as db
 import retrieval
 from crm import LEAD_TYPES, get_crm
 
@@ -52,186 +54,135 @@ def get_customer_details(customer_id: str) -> str:
 
 
 @beta_tool
-def get_vehicle(vin: str) -> str:
-    """Get vehicle details (year/make/model, mileage, warranty status) by VIN.
+def get_vehicle(vin: str, customer_id: str = "") -> str:
+    """Get a vehicle's details from the CRM: make/model/year, plate, warranty
+    and maintenance-plan end dates, Ford Protect cover, its last workshop visit
+    and the mileage its next service is due at.
+
+    With a customer, pass their customer_id from lookup_customer - the CRM
+    only shares vehicles on the identified customer's own account. A field
+    that is null is simply not on record: say so, never guess.
 
     Args:
-        vin: The 17-character Vehicle Identification Number.
+        vin: The vehicle's chassis number (VIN), usually 17 characters.
+        customer_id: The identified customer's ID, from lookup_customer.
     """
-    vehicle = db.VEHICLES.get(vin.strip().upper())
-    if vehicle is None:
-        return _json({"error": f"No vehicle found for VIN {vin}."})
-    return _json(vehicle)
+    return _json(CRM.get_vehicle(vin.strip(), str(customer_id or "").strip()))
 
 
 @beta_tool
-def get_service_history(vin: str) -> str:
-    """Get the service history for a vehicle at this dealership.
+def get_service_history(vin: str, customer_id: str = "") -> str:
+    """List a vehicle's completed workshop visits at ANB, newest first: job
+    card, type of work (mechanical, body shop, service) and dates. It does not
+    list the individual jobs done, and never contains prices.
+
+    With a customer, pass their customer_id - only vehicles on their own
+    account are shared.
 
     Args:
-        vin: The 17-character Vehicle Identification Number.
+        vin: The vehicle's chassis number (VIN).
+        customer_id: The identified customer's ID, from lookup_customer.
     """
-    vin = vin.strip().upper()
-    if vin not in db.VEHICLES:
-        return _json({"error": f"No vehicle found for VIN {vin}."})
-    return _json({"vin": vin, "history": db.SERVICE_HISTORY.get(vin, [])})
+    return _json(CRM.get_service_history(vin.strip(), str(customer_id or "").strip()))
 
 
 @beta_tool
 def check_recalls(vin: str) -> str:
-    """Check whether a vehicle has open safety recalls.
+    """Check which recall campaigns a vehicle is part of, from ANB's records.
+
+    "on_record" means the dealer system flagged the vehicle for the campaign;
+    whether the repair has already been done is NOT recorded, so never tell
+    the customer it is outstanding or fixed - the service team confirms.
+    Recall repairs are free. If do_not_drive is true, tell the customer not
+    to drive the vehicle and hand over as urgent.
 
     Args:
-        vin: The 17-character Vehicle Identification Number.
+        vin: The vehicle's chassis number (VIN).
     """
-    vin = vin.strip().upper()
-    if vin not in db.VEHICLES:
-        return _json({"error": f"No vehicle found for VIN {vin}."})
-    recalls = db.RECALLS.get(vin, [])
-    return _json({"vin": vin, "open_recalls": recalls, "count": len(recalls)})
+    return _json(CRM.check_recalls(vin.strip()))
 
 
 @beta_tool
-def get_service_menu() -> str:
-    """List the services this dealership offers, with prices and durations.
+def request_service_appointment(
+    service_needed: str,
+    customer_id: str = "",
+    vin: str = "",
+    preferred_date: str = "",
+    preferred_time: str = "",
+    mileage_km: int = 0,
+    phone: str = "",
+    name: str = "",
+    notes: str = "",
+) -> str:
+    """Ask ANB's service team to book a workshop visit. Nothing is booked:
+    the team calls the customer within one working day to confirm the slot.
 
-    Returns each service's code (used when booking), display name,
-    price in USD, and expected duration in minutes.
-    """
-    return _json(db.SERVICE_MENU)
-
-
-@beta_tool
-def get_available_appointments(start_date: str, days: int = 5) -> str:
-    """Find open service appointment slots.
-
-    Args:
-        start_date: First day to check, in YYYY-MM-DD format.
-        days: How many days ahead to check (1-14, default 5).
-    """
-    try:
-        start = date.fromisoformat(start_date)
-    except ValueError:
-        return _json({"error": f"Invalid date '{start_date}'. Use YYYY-MM-DD."})
-    if start < date.today():
-        return _json({"error": "start_date is in the past."})
-    days = max(1, min(days, 14))
-    availability = {}
-    for offset in range(days):
-        day = start + timedelta(days=offset)
-        slots = db.available_slots(day)
-        if slots:
-            availability[day.isoformat()] = slots
-    return _json({"availability": availability, "note": "Closed Sundays."})
-
-
-@beta_tool
-def book_appointment(customer_id: str, vin: str, service_code: str, date_str: str, time_str: str) -> str:
-    """Book a service appointment for a verified customer.
+    Read the details back and get the customer's agreement first. Tell them
+    it is a request, give them the reference, and never promise a time.
 
     Args:
-        customer_id: The customer's ID from lookup_customer, e.g. "C-1001".
-        vin: The 17-character VIN of the vehicle to be serviced.
-        service_code: A service code from get_service_menu, e.g. "oil_change".
-        date_str: Appointment date in YYYY-MM-DD format.
-        time_str: Appointment time in 24-hour HH:MM format, e.g. "09:30".
+        service_needed: What they want done, e.g. "10,000 km service" or "brake noise".
+        customer_id: The identified customer's ID, from lookup_customer.
+        vin: The vehicle's VIN, if known.
+        preferred_date: Preferred day as YYYY-MM-DD, if they gave one.
+        preferred_time: Preferred time of day, e.g. "morning" or "10:00".
+        mileage_km: The current mileage, if they know it. 0 means unknown.
+        phone: A callback number - required when the customer is not identified.
+        name: The customer's name, when they are not identified.
+        notes: Anything else the service team should know.
     """
-    vin = vin.strip().upper()
-    if not any(c["customer_id"] == customer_id for c in db.CUSTOMERS.values()):
-        return _json({"error": f"Unknown customer_id {customer_id}."})
-    if vin not in db.VEHICLES:
-        return _json({"error": f"No vehicle found for VIN {vin}."})
-    if service_code not in db.SERVICE_MENU:
-        return _json({"error": f"Unknown service_code '{service_code}'. Call get_service_menu for valid codes."})
-    try:
-        day = date.fromisoformat(date_str)
-        datetime.strptime(time_str, "%H:%M")
-    except ValueError:
-        return _json({"error": "Invalid date or time format. Use YYYY-MM-DD and HH:MM."})
-    if time_str not in db.available_slots(day):
-        return _json({
-            "error": f"{date_str} {time_str} is not available.",
-            "open_slots_that_day": db.available_slots(day),
-        })
-
-    appointment = {
-        "appointment_id": db.next_appointment_id(),
-        "customer_id": customer_id,
-        "vin": vin,
-        "service_code": service_code,
-        "service_name": db.SERVICE_MENU[service_code]["name"],
-        "date": date_str,
-        "time": time_str,
-        "status": "confirmed",
+    if not service_needed.strip():
+        return _json({"error": "Say what service the customer needs."})
+    request = {
+        "service_needed": service_needed.strip(),
+        "customer_id": str(customer_id or "").strip(),
+        "vin": vin.strip(),
+        "preferred_date": preferred_date.strip(),
+        "preferred_time": preferred_time.strip(),
+        "mileage_km": int(mileage_km) if mileage_km else None,
+        "phone": phone.strip(),
+        "name": name.strip(),
+        "notes": notes.strip(),
     }
-    db.APPOINTMENTS[appointment["appointment_id"]] = appointment
-    return _json({"booked": True, "appointment": appointment})
+    return _json(CRM.create_service_request(request))
 
 
 @beta_tool
-def cancel_appointment(appointment_id: str) -> str:
-    """Cancel an existing service appointment.
-
-    Args:
-        appointment_id: The appointment ID, e.g. "A-5000".
-    """
-    appointment = db.APPOINTMENTS.get(appointment_id)
-    if appointment is None:
-        return _json({"error": f"No appointment found with ID {appointment_id}."})
-    if appointment["status"] == "cancelled":
-        return _json({"error": f"Appointment {appointment_id} is already cancelled."})
-    appointment["status"] = "cancelled"
-    return _json({"cancelled": True, "appointment": appointment})
-
-
-@beta_tool
-def get_customer_appointments(customer_id: str) -> str:
-    """List a customer's upcoming and past appointments.
-
-    Args:
-        customer_id: The customer's ID from lookup_customer, e.g. "C-1001".
-    """
-    matches = [a for a in db.APPOINTMENTS.values() if a["customer_id"] == customer_id]
-    return _json({"customer_id": customer_id, "appointments": matches})
-
-
-@beta_tool
-def get_repair_status(customer_id: str) -> str:
-    """Check the status of a customer's vehicle currently in the shop.
-
-    Args:
-        customer_id: The customer's ID from lookup_customer, e.g. "C-1001".
-    """
-    orders = [ro for ro in db.REPAIR_ORDERS.values() if ro["customer_id"] == customer_id]
-    if not orders:
-        return _json({"customer_id": customer_id, "repair_orders": [], "note": "No vehicles currently in the shop."})
-    return _json({"customer_id": customer_id, "repair_orders": orders})
-
-
-@beta_tool
-def escalate_to_human(customer_id: str, reason: str, priority: str = "normal") -> str:
-    """Create a ticket for a human service advisor to call the customer back.
+def escalate_to_human(
+    customer_id: str,
+    reason: str,
+    priority: str = "normal",
+    phone: str = "",
+    name: str = "",
+    vin: str = "",
+) -> str:
+    """Hand the conversation to a person: opens a callback case for ANB's
+    customer service team, who call the customer back.
 
     Use for: warranty or billing disputes, complaints, anything involving an
-    accident or injury, requests to speak to a manager, or any request the
-    other tools cannot handle.
+    accident or injury, a vehicle that may be unsafe, requests to speak to a
+    manager, changing or cancelling an appointment, or anything the other
+    tools cannot handle.
 
     Args:
-        customer_id: The customer's ID, or "unknown" if the caller could not be identified.
-        reason: A one-to-three sentence summary of the issue for the advisor.
+        customer_id: The customer's ID, or "unknown" if they could not be identified.
+        reason: A one-to-three sentence summary of the issue for the team.
         priority: "normal", "high", or "urgent" (urgent = safety-related).
+        phone: A callback number - required when the customer is not identified.
+        name: The customer's name, when they are not identified.
+        vin: The vehicle's VIN, if the issue is about a vehicle.
     """
     if priority not in ("normal", "high", "urgent"):
         priority = "normal"
-    ticket = {
-        "ticket_id": db.next_escalation_id(),
-        "customer_id": customer_id,
-        "reason": reason,
+    handover = {
+        "customer_id": str(customer_id or "").strip(),
+        "reason": reason.strip(),
         "priority": priority,
-        "callback_eta": "within 1 business hour" if priority == "urgent" else "within 1 business day",
+        "phone": phone.strip(),
+        "name": name.strip(),
+        "vin": vin.strip(),
     }
-    db.ESCALATIONS.append(ticket)
-    return _json({"escalated": True, "ticket": ticket})
+    return _json(CRM.create_handover(handover))
 
 
 @beta_tool
@@ -255,7 +206,7 @@ def create_lead(
         name: The caller's full name.
         phone: The caller's callback phone number.
         lead_type: One of "new_vehicle", "used_vehicle", "trade_in",
-            "test_drive", "service_contract", or "other".
+            "test_drive", "service_contract", "accessories", "parts", or "other".
         interest: What they are interested in, e.g. "2026 F-150 Lariat, financing".
         email: The caller's email address, if they offered one.
         customer_id: The existing CRM customer ID, if the caller was identified.
@@ -482,19 +433,14 @@ TOOLS = [
     get_vehicle,
     get_service_history,
     check_recalls,
-    get_service_menu,
-    get_available_appointments,
-    book_appointment,
-    cancel_appointment,
-    get_customer_appointments,
-    get_repair_status,
+    request_service_appointment,
     escalate_to_human,
 ]
 
 # The read-only subset, for internal (staff) conversations in the CRM chat.
-# Booking, cancelling, lead creation and escalation are withheld so that a
-# staff member exploring the agent can never write to the CRM or the
-# scheduler by accident. Keep in sync with TOOLS when adding a read tool.
+# Service requests, lead creation and handovers are withheld so that a staff
+# member exploring the agent can never write to the CRM by accident. Keep in
+# sync with TOOLS when adding a read tool.
 READ_ONLY_TOOLS = [
     lookup_customer,
     get_customer_details,
@@ -508,8 +454,4 @@ READ_ONLY_TOOLS = [
     get_vehicle,
     get_service_history,
     check_recalls,
-    get_service_menu,
-    get_available_appointments,
-    get_customer_appointments,
-    get_repair_status,
 ]
