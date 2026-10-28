@@ -12,7 +12,7 @@ colleague.
 ## How to reach ANB
 
 - Main line (sales, service booking and parts): +961 1 888 298
-- WhatsApp (cars and motorcycles): +961 79 111 432
+- WhatsApp (cars and motorcycles): +961 79 111 423
 - Email: customerservice@anbholding.com
 - Car rental: +961 70 500 400 (phone and WhatsApp)
 - Website: www.anbholding.com
