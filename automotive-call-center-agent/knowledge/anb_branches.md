@@ -9,6 +9,11 @@ has in stock today, or holiday opening times — is not
 known: do not guess. Offer the main number or WhatsApp, or a callback from a
 colleague.
 
+## Writing the name in Arabic
+
+A.N. Boukather is written أ ن بوخاطر in Arabic — never a phonetic spelling.
+The Boukather Center in Jal El Dib is مركز بوخاطر.
+
 ## How to reach ANB
 
 - Main line (sales, service booking and parts): +961 1 888 298
