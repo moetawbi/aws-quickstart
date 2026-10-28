@@ -68,10 +68,6 @@ guess. Offer the main number or WhatsApp, or a callback from a colleague.
 - ANB Motorcycles showroom (motorcycles and scooters)
 - Phone: +961 1 888 298
 
-### Beirut — Chiyah and Hamra
-- Electric bicycle showrooms (ANB Motorcycles)
-- Phone: +961 1 888 298
-
 ## Opening hours
 
 These are the hours Ford Lebanon publishes for its locations:
