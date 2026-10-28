@@ -39,6 +39,7 @@ colleague.
 - Mazda and Ford showroom, service center and body shop, spare parts
 - ANB Motorcycles showroom and electric bicycles
 - Car rental desk (Mazda Lebanon showroom)
+- Closed on Saturday and Sunday — every brand, showroom and service center
 - Phone: +961 1 888 298
 - Nearest branch for: Beirut, Metn, Fanar, Broummana
 
@@ -73,23 +74,28 @@ colleague.
 
 ## Opening hours
 
-Every branch is closed on Sunday.
+Every branch is closed on Sunday. Nahr El Mot is also always closed on
+Saturday — for every brand, the showrooms and the service center alike. A
+customer who can only come on a Saturday should go to Jal El Dib, Baabda or
+Chtaura (cars) or Jal El Dib or Bechara El Khoury (motorcycles).
 
 ### Cars (Mazda and Ford)
 - Showrooms and parts in Jal El Dib, Baabda and Chtaura: Monday to Friday
   8:00 am – 6:00 pm, Saturday 8:00 am – 1:00 pm
 - Nahr El Mot — sales, service and spare parts: Monday to Friday
-  8:00 am – 6:00 pm
+  8:00 am – 6:00 pm; closed Saturday
 - Workshop (service, including quick service in Chtaura): Monday to Friday
-  8:00 am – 5:30 pm
+  8:00 am – 5:30 pm; closed Saturday
 
 ### Motorcycles and scooters (ANB Motorcycles)
 - Jal El Dib and Bechara El Khoury: Monday to Friday 8:00 am – 6:00 pm,
   Saturday 8:00 am – 1:00 pm
+- Nahr El Mot: closed Saturday
 
-Hours for the motorcycle showrooms in Nahr El Mot and Chtaura, and for car
-rental, are not published. Do not assume they match another showroom's: say
-which hours you can confirm and offer the main number or WhatsApp to check.
+Weekday hours for the motorcycle showrooms in Nahr El Mot and Chtaura, and
+hours for car rental, are not published. Do not assume they match another
+showroom's: say which hours you can confirm and offer the main number or
+WhatsApp to check.
 
 ## Finding the closest branch
 
