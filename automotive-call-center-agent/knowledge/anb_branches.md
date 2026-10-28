@@ -4,8 +4,8 @@ A.N. Boukather SAL (ANB) in Lebanon. Use this file for "where are you?",
 "which branch is closest to me?", "when are you open?" and "how do I reach
 you?".
 
-Anything not written here — for example car rental hours, or which models
-a particular branch has in stock today — is not
+Anything not written here — for example which models a particular branch
+has in stock today, or holiday opening times — is not
 known: do not guess. Offer the main number or WhatsApp, or a callback from a
 colleague.
 
@@ -92,8 +92,10 @@ Chtaura (cars) or Jal El Dib, Bechara El Khoury or Chtaura (motorcycles).
   8:00 am – 6:00 pm, Saturday 8:00 am – 1:00 pm
 - Nahr El Mot: Monday to Friday 8:00 am – 6:00 pm; closed Saturday
 
-Car rental hours are not published. Do not assume they match a showroom's:
-offer the car rental number, +961 70 500 400, to check.
+### Car rental
+Same hours as the Mazda showroom it operates from:
+- Jal El Dib: Monday to Friday 8:00 am – 6:00 pm, Saturday 8:00 am – 1:00 pm
+- Nahr El Mot: Monday to Friday 8:00 am – 6:00 pm; closed Saturday
 
 ## Finding the closest branch
 
