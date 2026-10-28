@@ -4,14 +4,16 @@ A.N. Boukather SAL (ANB) in Lebanon. Use this file for "where are you?",
 "which branch is closest to me?", "when are you open?" and "how do I reach
 you?".
 
-Anything not written here — for example Mazda or motorcycle showroom hours,
-or which brands a particular branch stocks today — is not known: do not
-guess. Offer the main number or WhatsApp, or a callback from a colleague.
+Anything not written here — for example motorcycle hours at Nahr El Mot or
+Chtaura, or which models a particular branch has in stock today — is not
+known: do not guess. Offer the main number or WhatsApp, or a callback from a
+colleague.
 
 ## How to reach ANB
 
 - Main line (sales, service booking and parts): +961 1 888 298
 - WhatsApp (cars and motorcycles): +961 79 111 432
+- Email: customerservice@anbholding.com
 - Car rental: +961 70 500 400 (phone and WhatsApp)
 - Website: www.anbholding.com
 - Head office: Metn Express Highway, Nahr El Mot, Antelias —
@@ -52,14 +54,15 @@ guess. Offer the main number or WhatsApp, or a callback from a colleague.
 
 ### Baabda
 - Address: Beirut–Damascus International Highway, Baabda
-- Car showroom
+- Car showroom (Mazda sales and parts)
 - Phone: +961 1 888 298
 - Nearest branch for: Baabda, Hazmieh, Furn el Chebbak, Kfarshima, Aley,
   Bhamdoun
 
 ### Chtaura — Beqaa
 - Address: Chtaura main road, near Coop — Nassar Palace
-- Car showroom and ANB Motorcycles showroom
+- Car showroom (Mazda sales, parts and quick service) and ANB Motorcycles
+  showroom
 - Phone: +961 1 888 298
 - Nearest branch for: Zahle, Taanayel, Rayak, Majdal Anjar, West Bekaa,
   Bekaa, Baalbek, Ras Baalbek, Hermel
@@ -70,18 +73,34 @@ guess. Offer the main number or WhatsApp, or a callback from a colleague.
 
 ## Opening hours
 
-These are the hours Ford Lebanon publishes for its locations:
+Every branch is closed on Sunday. Mazda and Ford publish different hours
+for the same buildings, so give the hours for the brand the customer is
+asking about.
 
-- Jal El Dib main showroom (Ford): Monday to Friday 8:00 am – 6:00 pm,
+### Mazda
+- Nahr El Mot — sales, service and parts: Monday to Friday
+  7:30 am – 7:00 pm, Saturday 7:30 am – 2:00 pm
+- Jal El Dib — sales and parts: Monday to Friday 7:30 am – 7:00 pm,
+  Saturday 7:30 am – 2:00 pm
+- Baabda — sales and parts: Monday to Friday 9:00 am – 7:00 pm,
+  Saturday 9:00 am – 2:00 pm
+- Chtaura — sales, parts and quick service: Monday to Friday
+  9:00 am – 6:00 pm, Saturday 9:00 am – 1:00 pm
+
+### Ford
+- Jal El Dib main showroom: Monday to Friday 8:00 am – 6:00 pm,
   Saturday 8:00 am – 1:00 pm
-- Nahr El Mot (sales, service and spare parts): Monday to Friday
+- Nahr El Mot — sales, service and spare parts: Monday to Friday
   8:00 am – 6:00 pm
 - Workshop (service): Monday to Friday 8:00 am – 5:30 pm
-- Sunday: closed
 
-Hours for the Mazda, motorcycle, bicycle and car-rental showrooms are not
-published. Do not assume they match Ford's: say these are the hours you can
-confirm and offer the main number or WhatsApp to check.
+### Motorcycles and scooters (ANB Motorcycles)
+- Jal El Dib and Bechara El Khoury: Monday to Friday 8:00 am – 6:00 pm,
+  Saturday 8:00 am – 1:00 pm
+
+Hours for the motorcycle showrooms in Nahr El Mot and Chtaura, and for car
+rental, are not published. Do not assume they match another showroom's: say
+which hours you can confirm and offer the main number or WhatsApp to check.
 
 ## Finding the closest branch
 
@@ -91,5 +110,7 @@ address is closest; for motorcycles in Beirut, Bechara El Khoury is the
 city showroom. If you are still unsure, give the main number,
 +961 1 888 298.
 
-Sources: anbholding.com (Contact Us and Mobility), en.fordlb.com (Contact),
-and the CRM's branch register — checked 29 October 2026.
+Sources: anbholding.com (Contact Us and Mobility), mazdalb.com (dealer
+locator), en.fordlb.com (Contact), the ANB Motorcycles Google Maps listings
+linked from anbholding.com, and the CRM's branch register — checked
+29 October 2026.
