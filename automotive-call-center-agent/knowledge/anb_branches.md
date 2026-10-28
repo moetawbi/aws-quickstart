@@ -73,26 +73,15 @@ colleague.
 
 ## Opening hours
 
-Every branch is closed on Sunday. Mazda and Ford publish different hours
-for the same buildings, so give the hours for the brand the customer is
-asking about.
+Every branch is closed on Sunday.
 
-### Mazda
-- Nahr El Mot — sales, service and parts: Monday to Friday
-  7:30 am – 7:00 pm, Saturday 7:30 am – 2:00 pm
-- Jal El Dib — sales and parts: Monday to Friday 7:30 am – 7:00 pm,
-  Saturday 7:30 am – 2:00 pm
-- Baabda — sales and parts: Monday to Friday 9:00 am – 7:00 pm,
-  Saturday 9:00 am – 2:00 pm
-- Chtaura — sales, parts and quick service: Monday to Friday
-  9:00 am – 6:00 pm, Saturday 9:00 am – 1:00 pm
-
-### Ford
-- Jal El Dib main showroom: Monday to Friday 8:00 am – 6:00 pm,
-  Saturday 8:00 am – 1:00 pm
+### Cars (Mazda and Ford)
+- Showrooms and parts in Jal El Dib, Baabda and Chtaura: Monday to Friday
+  8:00 am – 6:00 pm, Saturday 8:00 am – 1:00 pm
 - Nahr El Mot — sales, service and spare parts: Monday to Friday
   8:00 am – 6:00 pm
-- Workshop (service): Monday to Friday 8:00 am – 5:30 pm
+- Workshop (service, including quick service in Chtaura): Monday to Friday
+  8:00 am – 5:30 pm
 
 ### Motorcycles and scooters (ANB Motorcycles)
 - Jal El Dib and Bechara El Khoury: Monday to Friday 8:00 am – 6:00 pm,
@@ -111,6 +100,7 @@ city showroom. If you are still unsure, give the main number,
 +961 1 888 298.
 
 Sources: anbholding.com (Contact Us and Mobility), mazdalb.com (dealer
-locator), en.fordlb.com (Contact), the ANB Motorcycles Google Maps listings
-linked from anbholding.com, and the CRM's branch register — checked
+locator: departments and email), en.fordlb.com (Contact: car hours, which
+ANB applies to Mazda too), the ANB Motorcycles Google Maps listings linked
+from anbholding.com, and the CRM's branch register — checked
 29 October 2026.
