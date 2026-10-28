@@ -222,7 +222,7 @@ def _call_context() -> str:
 
 def run_interactive() -> None:
     agent = CallCenterAgent()
-    print("Summit Auto Group call center - type 'quit' to hang up.\n")
+    print("ANB call center - type 'quit' to hang up.\n")
     print(f"Alex: {agent.send(_call_context())}\n")
     while True:
         try:
