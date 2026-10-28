@@ -24,6 +24,13 @@ In Arabic replies use exactly these spellings — never a phonetic one:
 - In addresses: Antelias أنطلياس, Metn المتن, Metn Express Highway
   أوتوستراد المتن السريع, Sea Side Road الطريق البحري, Beirut–Damascus
   International Highway طريق بيروت – دمشق الدولية
+- Brands: Mazda مازدا, Ford فورد, Ford Trucks فورد تراكس, Vespa فيسبا,
+  Piaggio بياجيو, Aprilia أبريليا, Moto Guzzi موتو غوتزي, Bajaj باجاج,
+  Husqvarna هسكفارنا, Stromer سترومر. KTM stays in Latin letters, and so do
+  model names (CX-5, Ranger, GTS).
+
+Write each name wholly in Arabic letters or wholly in Latin letters — never
+a mix of the two inside one word.
 
 ## How to reach ANB
 
