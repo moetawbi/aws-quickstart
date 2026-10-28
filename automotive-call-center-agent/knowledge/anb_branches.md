@@ -4,8 +4,8 @@ A.N. Boukather SAL (ANB) in Lebanon. Use this file for "where are you?",
 "which branch is closest to me?", "when are you open?" and "how do I reach
 you?".
 
-Anything not written here — for example motorcycle hours at Nahr El Mot or
-Chtaura, or which models a particular branch has in stock today — is not
+Anything not written here — for example motorcycle hours in Chtaura, or
+which models a particular branch has in stock today — is not
 known: do not guess. Offer the main number or WhatsApp, or a callback from a
 colleague.
 
@@ -90,12 +90,11 @@ Chtaura (cars) or Jal El Dib or Bechara El Khoury (motorcycles).
 ### Motorcycles and scooters (ANB Motorcycles)
 - Jal El Dib and Bechara El Khoury: Monday to Friday 8:00 am – 6:00 pm,
   Saturday 8:00 am – 1:00 pm
-- Nahr El Mot: closed Saturday
+- Nahr El Mot: Monday to Friday 8:00 am – 6:00 pm; closed Saturday
 
-Weekday hours for the motorcycle showrooms in Nahr El Mot and Chtaura, and
-hours for car rental, are not published. Do not assume they match another
-showroom's: say which hours you can confirm and offer the main number or
-WhatsApp to check.
+Hours for the motorcycle showroom in Chtaura and for car rental are not
+published. Do not assume they match another showroom's: say which hours you
+can confirm and offer the main number or WhatsApp to check.
 
 ## Finding the closest branch
 
