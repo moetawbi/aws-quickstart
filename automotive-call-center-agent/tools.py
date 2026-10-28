@@ -9,9 +9,10 @@ Failures are returned as ``{"error": ...}`` payloads rather than raised,
 so the model can recover conversationally (ask the caller to re-spell a
 VIN, hand over to a person, etc.).
 
-Every vehicle, recall, service-request and handover call goes through the
-CRM client (crm.py): the live CRM in production, the demo data in
-data_store.py only when no CRM is configured.
+Vehicle, service-history and recall answers come from the CRM client
+(crm.py) - the live CRM in production, the demo data in data_store.py only
+when no CRM is configured. A handover is a Trengo action: it re-assigns the
+ticket being answered to the agent's handover team.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from anthropic import beta_tool
 import agent_context
 import catalogue
 import retrieval
+import trengo
 from crm import LEAD_TYPES, get_crm
 
 # CRM backend: RestCRM when CRM_API_BASE_URL is set, MockCRM otherwise.
@@ -55,13 +57,12 @@ def get_customer_details(customer_id: str) -> str:
 
 @beta_tool
 def get_vehicle(vin: str, customer_id: str = "") -> str:
-    """Get a vehicle's details from the CRM: make/model/year, plate, warranty
-    and maintenance-plan end dates, Ford Protect cover, its last workshop visit
-    and the mileage its next service is due at.
+    """Get a vehicle's details from the CRM: make, model, year, and its Ford
+    Protect cover if it has one. It has no warranty, service history or
+    recall information - hand those questions to a colleague.
 
     With a customer, pass their customer_id from lookup_customer - the CRM
-    only shares vehicles on the identified customer's own account. A field
-    that is null is simply not on record: say so, never guess.
+    only shares vehicles on the identified customer's own account.
 
     Args:
         vin: The vehicle's chassis number (VIN), usually 17 characters.
@@ -71,30 +72,23 @@ def get_vehicle(vin: str, customer_id: str = "") -> str:
 
 
 @beta_tool
-def get_service_history(vin: str, customer_id: str = "") -> str:
-    """List a vehicle's completed workshop visits at ANB, newest first: job
-    card, type of work (mechanical, body shop, service) and dates. It does not
-    list the individual jobs done, and never contains prices.
-
-    With a customer, pass their customer_id - only vehicles on their own
-    account are shared.
+def get_service_history(vin: str) -> str:
+    """STAFF ONLY. List a vehicle's completed workshop visits recorded in the
+    CRM, newest first: job card, type of work and dates - not each job, and no
+    prices. The CRM refuses it in a customer conversation.
 
     Args:
         vin: The vehicle's chassis number (VIN).
-        customer_id: The identified customer's ID, from lookup_customer.
     """
-    return _json(CRM.get_service_history(vin.strip(), str(customer_id or "").strip()))
+    return _json(CRM.get_service_history(vin.strip()))
 
 
 @beta_tool
 def check_recalls(vin: str) -> str:
-    """Check which recall campaigns a vehicle is part of, from ANB's records.
-
-    "on_record" means the dealer system flagged the vehicle for the campaign;
-    whether the repair has already been done is NOT recorded, so never tell
-    the customer it is outstanding or fixed - the service team confirms.
-    Recall repairs are free. If do_not_drive is true, tell the customer not
-    to drive the vehicle and hand over as urgent.
+    """STAFF ONLY. The recall campaigns the CRM's Recalls module has for a
+    vehicle, and whether each repair is done or booked. An empty result means
+    none is recorded in the CRM, not that the vehicle has none. The CRM
+    refuses it in a customer conversation.
 
     Args:
         vin: The vehicle's chassis number (VIN).
@@ -103,86 +97,57 @@ def check_recalls(vin: str) -> str:
 
 
 @beta_tool
-def request_service_appointment(
-    service_needed: str,
-    customer_id: str = "",
-    vin: str = "",
-    preferred_date: str = "",
-    preferred_time: str = "",
-    mileage_km: int = 0,
-    phone: str = "",
-    name: str = "",
-    notes: str = "",
-) -> str:
-    """Ask ANB's service team to book a workshop visit. Nothing is booked:
-    the team calls the customer within one working day to confirm the slot.
+def escalate_to_human(reason: str, priority: str = "normal", customer_id: str = "") -> str:
+    """Hand this conversation to ANB's team. It re-assigns the Trengo
+    conversation to the agent's handover team with your note, and you stop
+    replying on it - a colleague continues in the same conversation.
 
-    Read the details back and get the customer's agreement first. Tell them
-    it is a request, give them the reference, and never promise a time.
+    Use for: booking or changing a workshop visit, warranty, recall or
+    service-history questions, workshop prices, disputes, complaints,
+    anything involving an accident, injury or an unsafe vehicle, requests for
+    a manager, or anything the other tools cannot do. Afterwards tell the
+    customer a colleague will continue here shortly, and say nothing more.
 
     Args:
-        service_needed: What they want done, e.g. "10,000 km service" or "brake noise".
-        customer_id: The identified customer's ID, from lookup_customer.
-        vin: The vehicle's VIN, if known.
-        preferred_date: Preferred day as YYYY-MM-DD, if they gave one.
-        preferred_time: Preferred time of day, e.g. "morning" or "10:00".
-        mileage_km: The current mileage, if they know it. 0 means unknown.
-        phone: A callback number - required when the customer is not identified.
-        name: The customer's name, when they are not identified.
-        notes: Anything else the service team should know.
-    """
-    if not service_needed.strip():
-        return _json({"error": "Say what service the customer needs."})
-    request = {
-        "service_needed": service_needed.strip(),
-        "customer_id": str(customer_id or "").strip(),
-        "vin": vin.strip(),
-        "preferred_date": preferred_date.strip(),
-        "preferred_time": preferred_time.strip(),
-        "mileage_km": int(mileage_km) if mileage_km else None,
-        "phone": phone.strip(),
-        "name": name.strip(),
-        "notes": notes.strip(),
-    }
-    return _json(CRM.create_service_request(request))
-
-
-@beta_tool
-def escalate_to_human(
-    customer_id: str,
-    reason: str,
-    priority: str = "normal",
-    phone: str = "",
-    name: str = "",
-    vin: str = "",
-) -> str:
-    """Hand the conversation to a person: opens a callback case for ANB's
-    customer service team, who call the customer back.
-
-    Use for: warranty or billing disputes, complaints, anything involving an
-    accident or injury, a vehicle that may be unsafe, requests to speak to a
-    manager, changing or cancelling an appointment, or anything the other
-    tools cannot handle.
-
-    Args:
-        customer_id: The customer's ID, or "unknown" if they could not be identified.
-        reason: A one-to-three sentence summary of the issue for the team.
+        reason: Everything the colleague needs so the customer never repeats
+            themselves - what they want, which vehicle, and for a workshop
+            visit their preferred day and time.
         priority: "normal", "high", or "urgent" (urgent = safety-related).
-        phone: A callback number - required when the customer is not identified.
-        name: The customer's name, when they are not identified.
-        vin: The vehicle's VIN, if the issue is about a vehicle.
+        customer_id: The identified customer's ID, if they were identified.
     """
     if priority not in ("normal", "high", "urgent"):
         priority = "normal"
-    handover = {
-        "customer_id": str(customer_id or "").strip(),
-        "reason": reason.strip(),
-        "priority": priority,
-        "phone": phone.strip(),
-        "name": name.strip(),
-        "vin": vin.strip(),
-    }
-    return _json(CRM.create_handover(handover))
+    if not reason.strip():
+        return _json({"error": "Write the reason for the colleague taking over."})
+
+    ticket_id = agent_context.get_trengo_ticket_id()
+    if not ticket_id:
+        return _json({"error": "There is no live Trengo conversation to hand over here. Give the "
+                               "customer ANB's main number from the knowledge base instead."})
+
+    handover = (agent_context.get_agent_config() or {}).get("handover") or {}
+    team_id = handover.get("trengo_team_id")
+    if not team_id:
+        return _json({"error": "No handover team is set for this agent in the CRM. Give the customer "
+                               "ANB's main number from the knowledge base instead."})
+    team = handover.get("trengo_team_name") or f"team {team_id}"
+
+    note = "\n".join(filter(None, [
+        f"AI agent handover ({priority})",
+        reason.strip(),
+        f"CRM customer {customer_id.strip()}" if str(customer_id or "").strip() else "",
+    ]))
+    if agent_context.trengo_dry_run():
+        result = {}
+    else:
+        result = trengo.TrengoClient().assign_ticket(ticket_id, int(team_id), note)
+    if isinstance(result, dict) and "error" in result:
+        return _json(result)
+
+    agent_context.mark_handed_over(team)
+    return _json({"handed_over": True, "team": team,
+                  "next": "Tell the customer a colleague will continue this conversation here shortly. "
+                          "Do not answer anything further."})
 
 
 @beta_tool
@@ -433,13 +398,12 @@ TOOLS = [
     get_vehicle,
     get_service_history,
     check_recalls,
-    request_service_appointment,
     escalate_to_human,
 ]
 
 # The read-only subset, for internal (staff) conversations in the CRM chat.
-# Service requests, lead creation and handovers are withheld so that a staff
-# member exploring the agent can never write to the CRM by accident. Keep in
+# Lead creation and handovers are withheld so that a staff member exploring
+# the agent can never write to the CRM or Trengo by accident. Keep in
 # sync with TOOLS when adding a read tool.
 READ_ONLY_TOOLS = [
     lookup_customer,

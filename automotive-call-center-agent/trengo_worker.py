@@ -19,6 +19,11 @@ Replies are deduplicated two ways: a ticket is only answered when its
 latest message is inbound (so it never answers itself), and the id of the
 last inbound message answered per ticket is persisted to a state file so
 restarts don't double-reply.
+
+The agent is the CRM's default agent (its prompt, skills and handover team),
+and every turn runs with the ticket in agent_context. When the agent hands a
+ticket over (escalate_to_human re-assigns it to the handover team), the
+worker records it and never answers that ticket again - the team owns it.
 """
 
 from __future__ import annotations
@@ -28,11 +33,12 @@ import json
 import os
 import sys
 import time
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
+import agent_context
 import trengo
-from agent import CallCenterAgent
+from agent import CallCenterAgent, agent_for
 
 POLL_SECONDS = float(os.environ.get("TRENGO_POLL_SECONDS", "20"))
 TICKET_STATUS = os.environ.get("TRENGO_TICKET_STATUS", "OPEN")
@@ -53,28 +59,34 @@ def _log(text: str) -> None:
 
 class TrengoWorker:
     def __init__(self, client: trengo.TrengoClient | None = None,
-                 agent_factory=CallCenterAgent, state_path: Path | None = None,
+                 agent_factory=agent_for, state_path: Path | None = None,
                  dry_run: bool = False):
         self.client = client or trengo.TrengoClient()
+        # agent_for() loads the CRM's default agent, falling back to the
+        # built-in prompts when the CRM cannot be reached.
         self.agent_factory = agent_factory
-        self.dry_run = dry_run  # never post replies or update state; log instead
+        self.dry_run = dry_run  # never post replies, assign tickets or update state; log instead
         self.state_path = state_path or default_state_path()
         self.agents: dict[str, CallCenterAgent] = {}  # live sessions, keyed by ticket id
-        self.replied: dict[str, int] = self._load_state()
+        self.replied: dict[str, int] = {}
+        self.handed_over: dict[str, dict] = {}  # ticket id -> {"team", "at"}
+        self._load_state()
 
     # -- state ---------------------------------------------------------------
 
-    def _load_state(self) -> dict[str, int]:
+    def _load_state(self) -> None:
         try:
             data = json.loads(self.state_path.read_text(encoding="utf-8"))
-            return {str(k): int(v) for k, v in data.get("replied", {}).items()}
         except (OSError, ValueError):
-            return {}
+            return
+        self.replied = {str(k): int(v) for k, v in data.get("replied", {}).items()}
+        self.handed_over = {str(k): dict(v) for k, v in data.get("handed_over", {}).items()}
 
     def _save_state(self) -> None:
         try:
             self.state_path.write_text(
-                json.dumps({"replied": self.replied}, indent=2), encoding="utf-8"
+                json.dumps({"replied": self.replied, "handed_over": self.handed_over}, indent=2),
+                encoding="utf-8",
             )
         except OSError as exc:
             _log(f"could not persist state: {exc}")
@@ -110,6 +122,8 @@ class TrengoWorker:
         'replied', 'skipped', or 'error'."""
         summary = trengo.ticket_summary(ticket)
         ticket_id = str(summary["ticket_id"])
+        if ticket_id in self.handed_over:
+            return "skipped"  # handed to the team - never answered by the agent again
 
         messages = self.client.get_messages(ticket_id)
         if isinstance(messages, dict):
@@ -133,7 +147,15 @@ class TrengoWorker:
                 user_turn = f"{context}\n\nNew message from the customer:\n{trengo.message_text(latest)}"
             else:
                 user_turn = trengo.message_text(latest)
-            reply = agent.send(user_turn)
+            config = getattr(agent, "config", None)
+            with agent_context.conversation(
+                agent_slug=getattr(agent, "agent_slug", None),
+                agent_config=config,
+                trengo_ticket_id=ticket_id,
+                trengo_dry_run=self.dry_run,
+            ):
+                reply = agent.send(user_turn)
+                handed_to = agent_context.handed_over()
         except Exception as exc:
             _log(f"ticket {ticket_id}: agent failed ({exc.__class__.__name__}: {exc})")
             self.agents.pop(ticket_id, None)  # fresh session next cycle
@@ -154,7 +176,11 @@ class TrengoWorker:
 
         if latest_id:
             self.replied[ticket_id] = latest_id
-            self._save_state()
+        if handed_to:
+            self.handed_over[ticket_id] = {"team": handed_to, "at": datetime.now(timezone.utc).isoformat()}
+            self.agents.pop(ticket_id, None)
+            _log(f"ticket {ticket_id}: handed over to {handed_to}")
+        self._save_state()
         _log(f"ticket {ticket_id}: replied ({len(reply)} chars)")
         return "replied"
 

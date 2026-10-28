@@ -62,6 +62,8 @@ class TrengoClient:
             return {"error": "Trengo rate limit hit.", "retry": True}
         if not response.ok:
             return {"error": f"Trengo returned HTTP {response.status_code} for {path}."}
+        if not response.content.strip():
+            return {}  # a 2xx with no body (an assignment, for one) is a success
         try:
             return response.json()
         except ValueError:
@@ -105,6 +107,18 @@ class TrengoClient:
         if data is None:
             return payload if isinstance(payload, dict) else {"error": "Unexpected Trengo response."}
         return [m for m in data if isinstance(m, dict)]
+
+    def assign_ticket(self, ticket_id, team_id: int, note: str = "") -> dict:
+        """Re-assign a ticket to a team - the agent's handover. The customer
+        does not see it, but it is the agent acting on Trengo, so it sits
+        behind the same switch as replies. The note tells the team why."""
+        if not replies_enabled():
+            return {"error": REPLIES_DISABLED}
+        body = {"type": "team", "team_id": int(team_id)}
+        if note.strip():
+            body["note"] = note.strip()
+        payload = self._request("POST", f"/tickets/{ticket_id}/assign", json=body)
+        return payload if isinstance(payload, dict) else {"assigned": True}
 
     def send_message(self, ticket_id, text: str) -> dict:
         if not replies_enabled():

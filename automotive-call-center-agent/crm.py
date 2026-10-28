@@ -11,11 +11,9 @@ Two interchangeable implementations of the same interface:
     - ``GET  {base}/customers/{customer_id}``  -> one customer record
     - ``POST {base}/leads``                    -> create a sales/service lead
     - ``GET  {base}/leads/{lead_id}``          -> one lead record
-    - ``GET  {base}/vehicles/{vin}``           -> vehicle profile (warranty, plan, last visit)
-    - ``GET  {base}/vehicles/{vin}/service-history`` -> completed workshop visits
-    - ``GET  {base}/vehicles/{vin}/recalls``   -> recall campaigns for the VIN
-    - ``POST {base}/handovers``                -> a callback case for a person
-    - ``POST {base}/service-requests``         -> a service appointment request
+    - ``GET  {base}/vehicles/{vin}``           -> make/model/year + Ford Protect cover
+    - ``GET  {base}/vehicles/{vin}/service-history`` -> workshop visits (staff only)
+    - ``GET  {base}/vehicles/{vin}/recalls``   -> Recalls-module campaigns (staff only)
 
     Auth is a bearer token from ``CRM_API_KEY``
     (``Authorization: Bearer <key>``).
@@ -77,19 +75,14 @@ class MockCRM:
             return {"error": f"No lead found with ID {lead_id}."}
         return dict(lead)
 
-    # -- vehicles & callbacks (demo data, same shapes as the real CRM) ---------
+    # -- vehicles (demo data, same shapes as the real CRM) ----------------------
 
     def get_vehicle(self, vin: str, customer_id: str = "") -> dict:
         vehicle = db.VEHICLES.get(vin.strip().upper())
         if vehicle is None:
             return {"error": f"No vehicle found for VIN {vin}."}
-        warranty = vehicle.get("warranty") or {}
-        return {
-            "vin": vehicle["vin"], "make": vehicle["make"], "model": vehicle["model"], "year": vehicle["year"],
-            "warranty": {"ends_on": warranty.get("expires"),
-                         "state": "active" if warranty.get("active") else "expired"} if warranty else None,
-            "last_visit": {"on": None, "mileage_km": vehicle.get("mileage")},
-        }
+        return {"vin": vehicle["vin"], "make": vehicle["make"], "model": vehicle["model"],
+                "year": vehicle["year"], "ford_protect": None}
 
     def get_service_history(self, vin: str, customer_id: str = "") -> dict:
         vin = vin.strip().upper()
@@ -101,17 +94,6 @@ class MockCRM:
         recalls = [{"campaign": r["summary"], "code": r["recall_id"], "status": "open", "do_not_drive": False}
                    for r in db.RECALLS.get(vin, [])]
         return {"vin": vin, "recalls": recalls, "count": len(recalls)}
-
-    def create_handover(self, handover: dict) -> dict:
-        reference = db.next_escalation_id()
-        db.ESCALATIONS.append({"reference": reference, **handover})
-        return {"handed_over": True, "reference": reference, "priority": handover.get("priority", "normal")}
-
-    def create_service_request(self, request: dict) -> dict:
-        reference = db.next_escalation_id()
-        db.ESCALATIONS.append({"reference": reference, "type": "service_request", **request})
-        return {"requested": True, "reference": reference, "booked": False,
-                "next_step": "The service team will call the customer to confirm the slot."}
 
     # -- insurance -------------------------------------------------------------
     # There is no mock insurance book; these need the real CRM (the portfolio,
@@ -219,9 +201,10 @@ class RestCRM:
         payload = self._request("GET", f"/leads/{lead_id}")
         return payload if isinstance(payload, dict) else {"error": "Unexpected CRM response."}
 
-    # -- vehicles & callbacks --------------------------------------------------
-    # Reads are scoped by the CRM like insurance: a customer conversation must
-    # name the identified customer and only sees vehicles on that account.
+    # -- vehicles ----------------------------------------------------------------
+    # Scoped by the CRM like insurance: a customer conversation must name the
+    # identified customer, only sees vehicles on that account, and gets no
+    # service history or recalls (staff only for now).
 
     @staticmethod
     def _vin_path(vin: str) -> str:
@@ -240,12 +223,6 @@ class RestCRM:
 
     def check_recalls(self, vin: str) -> dict:
         return self._dict(self._request("GET", f"/vehicles/{self._vin_path(vin)}/recalls"))
-
-    def create_handover(self, handover: dict) -> dict:
-        return self._dict(self._request("POST", "/handovers", json=handover))
-
-    def create_service_request(self, request: dict) -> dict:
-        return self._dict(self._request("POST", "/service-requests", json=request))
 
     # -- insurance (read-only) -------------------------------------------------
 

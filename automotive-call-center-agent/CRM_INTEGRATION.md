@@ -87,25 +87,31 @@ field. The agent reads the lead reference back to the customer.
 
 One lead with at least `lead_id` and `status`. `404` if unknown.
 
-### A5–A9. Vehicles, recalls and callbacks (added 2026-10-29)
+### A5–A7. Vehicles (2026-10-29)
 
 These replaced the demo data in `data_store.py` for `get_vehicle`,
-`get_service_history`, `check_recalls` and `escalate_to_human`, and replaced
-booking with `request_service_appointment`. `MockCRM` still answers them from
-`data_store.py` when `CRM_API_BASE_URL` is unset.
+`get_service_history` and `check_recalls`. `MockCRM` still answers them from
+`data_store.py` when `CRM_API_BASE_URL` is unset. The CRM answers from its
+own records only - never from IMAD's data.
 
-| Endpoint | Tool | Notes |
+| Endpoint | Tool | Who |
 |---|---|---|
-| `GET {base}/vehicles/{vin}?customer_id=` | `get_vehicle` | warranty, maintenance plan, Ford Protect, last visit, next service km |
-| `GET {base}/vehicles/{vin}/service-history?customer_id=` | `get_service_history` | completed workshop visits, no prices |
-| `GET {base}/vehicles/{vin}/recalls` | `check_recalls` | `on_record` = flagged, repair status unknown |
-| `POST {base}/handovers` | `escalate_to_human` | opens a callback case for the CRM's case agents |
-| `POST {base}/service-requests` | `request_service_appointment` | a request the service team confirms — nothing is booked |
+| `GET {base}/vehicles/{vin}?customer_id=` | `get_vehicle` | customer (own vehicles only) and staff - make/model/year, Ford Protect cover |
+| `GET {base}/vehicles/{vin}/service-history` | `get_service_history` | staff only (403 for a customer) |
+| `GET {base}/vehicles/{vin}/recalls` | `check_recalls` | staff only (403 for a customer) - the CRM's Recalls module |
 
-Vehicle reads in a customer conversation need the identified `customer_id`
-and only return that customer's vehicles; a staff conversation (actor grant)
-may read any VIN. Handovers and requests need a `customer_id` or a callback
-`phone`.
+"Staff" is a conversation carrying an actor grant whose CRM user has
+`view service cases`.
+
+### Handover (not a CRM endpoint)
+
+`escalate_to_human` re-assigns the Trengo ticket being answered to the
+agent's handover team (`handover.trengo_team_id` in the agent config the CRM
+serves) with a note: Trengo `POST /tickets/{id}/assign`
+`{"type": "team", "team_id": ..., "note": ...}`. The worker then records the
+ticket as handed over and never answers it again. There is no booking tool:
+a workshop visit is handed over the same way, with the preferred day and
+time in the note.
 
 ### Acceptance (Part A)
 
