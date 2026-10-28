@@ -1,3 +1,6 @@
-anthropic>=1.0.0
+# anthropic is held below 2.x: the tool runner and memory tool were built and
+# tested against 1.2.x, and a fresh server install otherwise pulls the newest
+# major. Raise the ceiling only after re-running the agent against it.
+anthropic>=1.2.0,<2
 requests>=2.31.0
 pypdf>=4.0.0
