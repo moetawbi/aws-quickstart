@@ -16,6 +16,10 @@ Response field names vary a little across Trengo channel types, so the
 message parsing helpers (`message_text`, `is_inbound`, `is_internal_note`)
 probe the common shapes instead of assuming one. Failures are returned as
 ``{"error": ...}`` dicts, never raised, matching the CRM client.
+
+Nothing is ever posted to a customer unless ``TRENGO_REPLIES_ENABLED=1``:
+``send_message`` is the only write and it refuses without it, so reading
+tickets for testing can never turn into answering them by accident.
 """
 
 from __future__ import annotations
@@ -26,6 +30,13 @@ import requests
 
 DEFAULT_BASE_URL = "https://app.trengo.com/api/v2"
 DEFAULT_TIMEOUT = float(os.environ.get("TRENGO_TIMEOUT_SECONDS", "15"))
+REPLIES_DISABLED = "Trengo replies are disabled (set TRENGO_REPLIES_ENABLED=1 to let the agent answer customers)."
+
+
+def replies_enabled() -> bool:
+    """The kill switch for every customer-visible Trengo message. Read per
+    call, so flipping the env var and restarting is the whole change."""
+    return os.environ.get("TRENGO_REPLIES_ENABLED", "").strip() == "1"
 
 
 class TrengoClient:
@@ -96,6 +107,8 @@ class TrengoClient:
         return [m for m in data if isinstance(m, dict)]
 
     def send_message(self, ticket_id, text: str) -> dict:
+        if not replies_enabled():
+            return {"error": REPLIES_DISABLED}
         payload = self._request("POST", f"/tickets/{ticket_id}/messages", json={"message": text})
         return payload if isinstance(payload, dict) else {"sent": True}
 

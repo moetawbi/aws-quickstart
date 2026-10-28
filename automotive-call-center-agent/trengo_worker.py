@@ -202,6 +202,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Answer Trengo tickets with the call center agent")
     parser.add_argument("--once", action="store_true", help="run a single poll cycle and exit")
     args = parser.parse_args()
+    if not trengo.replies_enabled():
+        # Refuse before any model call: a disabled worker must not even
+        # draft replies (it would spend tokens on answers nobody may send).
+        print(trengo.REPLIES_DISABLED, file=sys.stderr)
+        raise SystemExit(1)
     if not os.environ.get("TRENGO_API_KEY"):
         print("TRENGO_API_KEY is not set.", file=sys.stderr)
         raise SystemExit(1)

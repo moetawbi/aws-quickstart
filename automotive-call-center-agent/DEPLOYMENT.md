@@ -186,3 +186,15 @@ entire integration.
   `systemctl restart cc-agent-webhook cc-agent-admin cc-agent-chat`.
 - **Kill switch:** `systemctl stop cc-agent-webhook` (and remove the cron
   line) stops all replies immediately; tickets stay in Trengo for humans.
+  Independently, nothing is ever posted to Trengo unless the agent's `.env`
+  has `TRENGO_REPLIES_ENABLED=1` — without it the webhook and the worker
+  refuse to start and `send_message` refuses to send.
+
+## Internal-only deployment (no customer channel)
+
+To run the agent for staff only — the CRM's Agent Chat and the
+Knowledge/Manuals/Memory pages, no customer ever reaching it — install only
+`cc-agent-admin` and `cc-agent-chat`, skip the webhook unit, the cron line
+and the reverse-proxy step, and leave `TRENGO_REPLIES_ENABLED` and
+`TRENGO_API_KEY` unset. Both services bind to `127.0.0.1`, so nothing is
+reachable from outside the server.

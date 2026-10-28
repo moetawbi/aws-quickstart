@@ -49,6 +49,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+import trengo
 from trengo_worker import TrengoWorker
 
 WEBHOOK_PATH = os.environ.get("TRENGO_WEBHOOK_PATH", "/webhooks/trengo")
@@ -203,6 +204,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    if not trengo.replies_enabled():
+        print(trengo.REPLIES_DISABLED, file=sys.stderr)
+        raise SystemExit(1)
     if not os.environ.get("TRENGO_API_KEY"):
         print("TRENGO_API_KEY is not set.", file=sys.stderr)
         raise SystemExit(1)
