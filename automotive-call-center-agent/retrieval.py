@@ -23,6 +23,8 @@ import math
 import os
 import re
 import sys
+
+import agent_stores
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -135,18 +137,17 @@ def _chunk_pdf(path: Path) -> list[Chunk]:
     return chunks
 
 
-def load_chunks() -> list[Chunk]:
-    directory = manuals_dir()
-    if not directory.is_dir():
-        return []
+MANUAL_SUFFIXES = {".pdf", ".md", ".txt", ".csv", ".json"}
+
+
+def load_chunks(agent_slug: str | None = None) -> list[Chunk]:
+    """Chunks from every manual this agent can see: the shared manuals
+    directory, then its own ``agents/<slug>/`` folder."""
     chunks: list[Chunk] = []
-    for path in sorted(directory.iterdir()):
-        if not path.is_file():
-            continue
-        suffix = path.suffix.lower()
-        if suffix == ".pdf":
+    for _name, path in agent_stores.iter_files(manuals_dir(), agent_slug, MANUAL_SUFFIXES):
+        if path.suffix.lower() == ".pdf":
             chunks.extend(_chunk_pdf(path))
-        elif suffix in {".md", ".txt", ".csv", ".json"}:
+        else:
             chunks.extend(_chunk_text_file(path))
     return chunks
 
@@ -202,40 +203,33 @@ class BM25Index:
         return scored[:k]
 
 
-_index: BM25Index | None = None
-_signature: tuple | None = None
+# One index per agent (None = the shared manuals alone), each rebuilt only
+# when something that agent can see changes on disk.
+_indexes: dict[str | None, tuple[tuple, BM25Index]] = {}
 
 
-def _dir_signature() -> tuple:
-    directory = manuals_dir()
-    if not directory.is_dir():
-        return ()
-    entries = []
-    for path in sorted(directory.iterdir()):
-        if path.is_file() and path.suffix.lower() in {".pdf", ".md", ".txt", ".csv", ".json"}:
-            stat = path.stat()
-            entries.append((path.name, stat.st_mtime_ns, stat.st_size))
-    return tuple(entries)
+def _dir_signature(agent_slug: str | None = None) -> tuple:
+    return agent_stores.signature(manuals_dir(), agent_slug, MANUAL_SUFFIXES)
 
 
-def get_index() -> BM25Index:
-    """Build the index on first use and rebuild automatically whenever the
-    manuals directory changes on disk (e.g. a manual uploaded through the
+def get_index(agent_slug: str | None = None) -> BM25Index:
+    """Build an agent's index on first use and rebuild it automatically
+    whenever its manuals change on disk (e.g. a manual uploaded through the
     admin API) - no restart or signaling needed."""
-    global _index, _signature
-    signature = _dir_signature()
-    if _index is None or signature != _signature:
-        chunks = load_chunks()
-        _index = BM25Index(chunks)
-        _signature = signature
+    key = agent_stores.safe_slug(agent_slug)
+    signature = _dir_signature(key)
+    cached = _indexes.get(key)
+    if cached is None or cached[0] != signature:
+        chunks = load_chunks(key)
+        cached = (signature, BM25Index(chunks))
+        _indexes[key] = cached
         if chunks:
             sources = sorted({c.source for c in chunks})
-            print(f"[manuals] indexed {len(chunks)} chunks from: {', '.join(sources)}", file=sys.stderr)
-    return _index
+            label = f" for {key}" if key else ""
+            print(f"[manuals] indexed {len(chunks)} chunks{label} from: {', '.join(sources)}", file=sys.stderr)
+    return cached[1]
 
 
 def reset_index() -> None:
-    """Drop the cached index (tests)."""
-    global _index, _signature
-    _index = None
-    _signature = None
+    """Drop every cached index (tests)."""
+    _indexes.clear()

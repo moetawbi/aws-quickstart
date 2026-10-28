@@ -3,3 +3,5 @@ __pycache__/
 .trengo_state.json
 memory/
 .env
+.venv/
+catalogues/

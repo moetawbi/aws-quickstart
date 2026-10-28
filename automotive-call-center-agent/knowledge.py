@@ -23,6 +23,8 @@ from __future__ import annotations
 import json
 import os
 import sys
+
+import agent_stores
 from pathlib import Path
 
 SUPPORTED_TEXT = {".md", ".txt", ".csv", ".json"}
@@ -82,58 +84,48 @@ def _read_text(path: Path) -> str:
     return text
 
 
-def load_documents() -> list[tuple[str, str]]:
-    """Load (filename, text) pairs from the knowledge directory, sorted by
-    name for a deterministic - and therefore cacheable - ordering."""
-    directory = knowledge_dir()
-    if not directory.is_dir():
-        return []
+def load_documents(agent_slug: str | None = None) -> list[tuple[str, str]]:
+    """Load (filename, text) pairs this agent can see: the shared knowledge
+    directory, then its own ``agents/<slug>/`` folder. Sorted within each, for
+    a deterministic - and therefore cacheable - ordering."""
     documents = []
-    for path in sorted(directory.iterdir()):
-        if not path.is_file() or path.suffix.lower() not in SUPPORTED:
-            continue
+    for name, path in agent_stores.iter_files(knowledge_dir(), agent_slug, SUPPORTED):
         text = _read_pdf(path) if path.suffix.lower() == ".pdf" else _read_text(path)
         if not text:
             continue
         if len(text) > MAX_CHARS_PER_FILE:
             text = text[:MAX_CHARS_PER_FILE] + TRUNCATION_MARKER
-            print(f"[knowledge] {path.name} truncated to {MAX_CHARS_PER_FILE} chars", file=sys.stderr)
-        documents.append((path.name, text))
+            print(f"[knowledge] {name} truncated to {MAX_CHARS_PER_FILE} chars", file=sys.stderr)
+        documents.append((name, text))
     return documents
 
 
-def _dir_signature() -> tuple:
-    directory = knowledge_dir()
-    if not directory.is_dir():
-        return ()
-    entries = []
-    for path in sorted(directory.iterdir()):
-        if path.is_file() and path.suffix.lower() in SUPPORTED:
-            stat = path.stat()
-            entries.append((path.name, stat.st_mtime_ns, stat.st_size))
-    return tuple(entries)
+def _dir_signature(agent_slug: str | None = None) -> tuple:
+    return agent_stores.signature(knowledge_dir(), agent_slug, SUPPORTED)
 
 
-_cached_text: str | None = None
-_cached_signature: tuple | None = None
+# One cached rendering per agent (None = the shared set alone), each rebuilt
+# only when something that agent can see changes on disk.
+_cache: dict[str | None, tuple[tuple, str]] = {}
 
 
-def get_knowledge_text() -> str:
-    """Cached accessor: reloads only when the knowledge directory changes
-    on disk, so files added/edited/removed (e.g. via the admin API) take
-    effect on the next new conversation without a restart."""
-    global _cached_text, _cached_signature
-    signature = _dir_signature()
-    if _cached_text is None or signature != _cached_signature:
-        _cached_text = load_knowledge_text()
-        _cached_signature = signature
-    return _cached_text
+def get_knowledge_text(agent_slug: str | None = None) -> str:
+    """Cached accessor: reloads only when this agent's knowledge changes on
+    disk, so files added/edited/removed (e.g. via the admin API) take effect
+    on the next new conversation without a restart."""
+    key = agent_stores.safe_slug(agent_slug)
+    signature = _dir_signature(key)
+    cached = _cache.get(key)
+    if cached is None or cached[0] != signature:
+        cached = (signature, load_knowledge_text(key))
+        _cache[key] = cached
+    return cached[1]
 
 
-def load_knowledge_text() -> str:
+def load_knowledge_text(agent_slug: str | None = None) -> str:
     """The knowledge base as one formatted string for a system block, or
     an empty string when there is nothing to load."""
-    documents = load_documents()
+    documents = load_documents(agent_slug)
     if not documents:
         return ""
     sections = []

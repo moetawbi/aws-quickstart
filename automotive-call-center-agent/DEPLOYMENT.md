@@ -51,7 +51,13 @@ ANTHROPIC_API_KEY=sk-ant-...
 TRENGO_API_KEY=...
 TRENGO_WEBHOOK_SECRET=<openssl rand -hex 24>
 ADMIN_API_TOKEN=<openssl rand -hex 24>
+CHAT_API_TOKEN=<openssl rand -hex 24>
 ```
+
+`ADMIN_API_TOKEN` and `CHAT_API_TOKEN` are two separate secrets for two
+separate localhost services (`admin_api.py` on 8081 manages the file stores;
+`chat_api.py` on 8082 answers the CRM's in-panel chat). The CRM holds both as
+`CALL_CENTER_ADMIN_API_TOKEN` and `CALL_CENTER_CHAT_API_TOKEN`.
 
 Verify against your real Trengo account before starting services:
 
@@ -83,9 +89,12 @@ WantedBy=multi-user.target
 `/etc/systemd/system/cc-agent-admin.service`: same file with
 `Description=... admin API` and `ExecStart=... admin_api.py`.
 
+`/etc/systemd/system/cc-agent-chat.service`: same file with
+`Description=... chat API` and `ExecStart=... chat_api.py`.
+
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now cc-agent-webhook cc-agent-admin
+sudo systemctl enable --now cc-agent-webhook cc-agent-admin cc-agent-chat
 journalctl -u cc-agent-webhook -f     # watch it work
 ```
 
@@ -174,6 +183,6 @@ entire integration.
   and your `knowledge/` + `manuals/` content; `.trengo_state.json` prevents
   double replies after restarts — keep it with the install.
 - **Upgrades:** `git pull` the branch, `pip install -r requirements.txt`,
-  `systemctl restart cc-agent-webhook cc-agent-admin`.
+  `systemctl restart cc-agent-webhook cc-agent-admin cc-agent-chat`.
 - **Kill switch:** `systemctl stop cc-agent-webhook` (and remove the cron
   line) stops all replies immediately; tickets stay in Trengo for humans.

@@ -30,6 +30,7 @@ import os
 
 import requests
 
+import agent_context
 import data_store as db
 
 DEFAULT_TIMEOUT = float(os.environ.get("CRM_TIMEOUT_SECONDS", "10"))
@@ -70,6 +71,25 @@ class MockCRM:
             return {"error": f"No lead found with ID {lead_id}."}
         return dict(lead)
 
+    # -- insurance -------------------------------------------------------------
+    # There is no mock insurance book; these need the real CRM (the portfolio,
+    # tariffs and rule engine all live there), so say so rather than inventing
+    # cover or prices.
+
+    _NO_MOCK = {"error": "Insurance information is only available against the live CRM."}
+
+    def get_insurance_policies(self, customer_id: str) -> dict:
+        return dict(self._NO_MOCK)
+
+    def get_insurance_policy(self, policy_number: str) -> dict:
+        return dict(self._NO_MOCK)
+
+    def get_insurance_catalogue(self, insurance_type: str = "") -> dict:
+        return dict(self._NO_MOCK)
+
+    def quote_insurance(self, payload: dict) -> dict:
+        return dict(self._NO_MOCK)
+
 
 class RestCRM:
     """Generic REST CRM client. Point it at your CRM with CRM_API_BASE_URL
@@ -85,13 +105,30 @@ class RestCRM:
 
     def _request(self, method: str, path: str, **kwargs) -> dict | list:
         url = f"{self.base_url}{path}"
+        # The actor grant (internal chats only) rides on every request; the
+        # CRM uses it to apply that staff member's own permissions.
+        headers = {**agent_context.headers(), **kwargs.pop("headers", {})}
         try:
-            response = self.session.request(method, url, timeout=self.timeout, **kwargs)
+            response = self.session.request(
+                method, url, timeout=self.timeout, headers=headers or None, **kwargs
+            )
         except requests.RequestException as exc:
             return {"error": f"CRM is unreachable ({exc.__class__.__name__})."}
         if response.status_code == 404:
             return {"error": "Not found in CRM."}
         if not response.ok:
+            # The CRM explains refusals in its own words (a permission denial
+            # names the user and the missing permission); pass that through
+            # rather than flattening everything to a status code.
+            detail = ""
+            try:
+                body = response.json()
+                if isinstance(body, dict):
+                    detail = str(body.get("error") or body.get("message") or "")
+            except ValueError:
+                detail = ""
+            if detail:
+                return {"error": detail}
             return {"error": f"CRM returned HTTP {response.status_code}."}
         try:
             return response.json()
@@ -139,6 +176,25 @@ class RestCRM:
     def get_lead(self, lead_id: str) -> dict:
         payload = self._request("GET", f"/leads/{lead_id}")
         return payload if isinstance(payload, dict) else {"error": "Unexpected CRM response."}
+
+    # -- insurance (read-only) -------------------------------------------------
+
+    def get_insurance_policies(self, customer_id: str) -> dict:
+        payload = self._request("GET", "/insurance/policies", params={"customer_id": customer_id})
+        return payload if isinstance(payload, dict) else {"error": "Unexpected CRM response."}
+
+    def get_insurance_policy(self, policy_number: str) -> dict:
+        payload = self._request("GET", f"/insurance/policies/{policy_number}")
+        return payload if isinstance(payload, dict) else {"error": "Unexpected CRM response."}
+
+    def get_insurance_catalogue(self, insurance_type: str = "") -> dict:
+        params = {"insurance_type": insurance_type} if insurance_type else None
+        payload = self._request("GET", "/insurance/catalogue", params=params)
+        return payload if isinstance(payload, dict) else {"error": "Unexpected CRM response."}
+
+    def quote_insurance(self, payload: dict) -> dict:
+        result = self._request("POST", "/insurance/quote", json=payload)
+        return result if isinstance(result, dict) else {"error": "Unexpected CRM response."}
 
 
 def get_crm() -> MockCRM | RestCRM:

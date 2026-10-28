@@ -38,7 +38,10 @@ import sys
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs
 
+import agent_stores
+import catalogue
 import knowledge
 import memory_store
 import retrieval
@@ -72,10 +75,16 @@ def stores() -> dict[str, dict]:
 
 
 def resolve_in_store(store: dict, rel_path: str) -> Path | None:
-    """Confine a URL path to the store directory (one nesting level allowed)."""
+    """Confine a URL path to the store directory (one nesting level allowed).
+
+    In a shared store the ``agents/`` folder is reserved for per-agent files,
+    which are only reachable with ``?agent=<slug>`` - so a shared upload can
+    never land in, or overwrite, an agent's private folder."""
     root = store["dir"].resolve()
     cleaned = rel_path.strip("/")
     if not cleaned or cleaned.count("/") > 1:
+        return None
+    if store.get("shared") and cleaned.split("/")[0] == agent_stores.AGENTS_DIRNAME:
         return None
     candidate = (root / cleaned).resolve()
     if candidate == root or (root not in candidate.parents):
@@ -137,7 +146,22 @@ class AdminHandler(BaseHTTPRequestHandler):
         if parts[1] not in all_stores:
             self._send_json(404, {"error": f"unknown store '{parts[1]}'; use knowledge, manuals, or memory"})
             return None
-        return (parts[1], all_stores[parts[1]], "/".join(parts[2:]))
+        store = dict(all_stores[parts[1]])
+        slug = self._agent_slug()
+        if slug:
+            # This agent's private folder; created on first upload.
+            store["dir"] = agent_stores.agent_dir(store["dir"], slug)
+            store["agent"] = slug
+            store["shared"] = False
+        else:
+            store["shared"] = True
+        return (parts[1], store, "/".join(parts[2:]))
+
+    def _agent_slug(self) -> str | None:
+        """``?agent=<slug>`` selects an agent's own folder; absent means the
+        shared store every agent reads."""
+        query = parse_qs(self.path.partition("?")[2])
+        return agent_stores.safe_slug((query.get("agent") or [""])[0])
 
     # -- store operations --------------------------------------------------------
 
@@ -145,8 +169,11 @@ class AdminHandler(BaseHTTPRequestHandler):
     def _list_store(name: str, store: dict) -> dict:
         root = store["dir"]
         files = []
+        reserved = root / agent_stores.AGENTS_DIRNAME if store.get("shared", True) else None
         if root.is_dir():
             for path in sorted(root.rglob("*")):
+                if reserved is not None and (path == reserved or reserved in path.parents):
+                    continue  # other agents' private files are not shared content
                 if path.is_file():
                     stat = path.stat()
                     files.append({
@@ -155,12 +182,23 @@ class AdminHandler(BaseHTTPRequestHandler):
                         "modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
                     })
         return {"store": name, "directory": str(root), "note": store["note"],
+                "agent": store.get("agent"),
                 "extensions": sorted(store["extensions"]), "files": files}
 
     def _status(self) -> dict:
-        overview = {name: {"files": len(self._list_store(name, s)["files"]),
-                           "directory": str(s["dir"])} for name, s in stores().items()}
-        index = retrieval.get_index()
+        slug = self._agent_slug()
+        overview = {}
+        for name, s in stores().items():
+            shared = {**s, "shared": True}
+            entry = {"files": len(self._list_store(name, shared)["files"]),
+                     "directory": str(s["dir"])}
+            if slug:
+                own = {**s, "dir": agent_stores.agent_dir(s["dir"], slug), "shared": False}
+                entry["agent_files"] = len(self._list_store(name, own)["files"])
+                entry["agent_directory"] = str(own["dir"])
+            overview[name] = entry
+        # The index this agent actually searches: shared manuals plus its own.
+        index = retrieval.get_index(slug)
         return {
             "agent": {
                 "model": os.environ.get("CALL_CENTER_MODEL", "claude-opus-5"),
@@ -168,6 +206,7 @@ class AdminHandler(BaseHTTPRequestHandler):
                 "crm": "rest" if os.environ.get("CRM_API_BASE_URL") else "mock",
                 "trengo_configured": bool(os.environ.get("TRENGO_API_KEY")),
             },
+            "agent_slug": slug,
             "stores": overview,
             "manual_index": {"chunks": len(index.chunks),
                              "sources": sorted({c.source for c in index.chunks})},
@@ -181,6 +220,9 @@ class AdminHandler(BaseHTTPRequestHandler):
             return
         if not self._authorized():
             self._send_json(401, {"error": "bad or missing admin token"})
+            return
+        if self._catalogue_parts() is not None:
+            self._catalogue_get()
             return
         routed = self._route()
         if routed is None:
@@ -225,7 +267,7 @@ class AdminHandler(BaseHTTPRequestHandler):
             self._send_json(413, {"error": f"file exceeds {MAX_UPLOAD_BYTES} bytes"})
             return
         data = self.rfile.read(length)
-        target.parent.mkdir(parents=True, exist_ok=True)
+        target.parent.mkdir(parents=True, exist_ok=True)  # an agent's folder appears on first upload
         target.write_bytes(data)
         _log(f"{name}/{rel_path} uploaded ({length} bytes)")
         self._send_json(200, {"saved": True, "store": name, "name": rel_path, "size": length,
@@ -234,6 +276,13 @@ class AdminHandler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         if not self._authorized():
             self._send_json(401, {"error": "bad or missing admin token"})
+            return
+        parts = self._catalogue_parts()
+        if parts is not None:
+            if len(parts) != 1:
+                self._send_json(405, {"error": "DELETE /admin/catalogue/{id}"})
+                return
+            self._send_json(200, {"forgotten": catalogue.forget(parts[0]), "id": parts[0]})
             return
         routed = self._route()
         if routed is None:
@@ -249,6 +298,84 @@ class AdminHandler(BaseHTTPRequestHandler):
         target.unlink()
         _log(f"{name}/{rel_path} deleted")
         self._send_json(200, {"deleted": True, "store": name, "name": rel_path})
+
+
+    # -- catalogues ---------------------------------------------------------------
+    # The CRM configures an agent's catalogues; this process fetches and keeps
+    # them. Only counts, freshness and detected fields come back - the items
+    # themselves never cross into the CRM.
+
+    def _catalogue_parts(self) -> list[str] | None:
+        parts = self.path.split("?")[0].strip("/").split("/")
+        if len(parts) >= 2 and parts[0] == "admin" and parts[1] == "catalogue":
+            return parts[2:]
+        return None
+
+    def _catalogue_get(self) -> None:
+        parts = self._catalogue_parts() or []
+        if len(parts) != 1:
+            self._send_json(404, {"error": "GET /admin/catalogue/{id}"})
+            return
+        self._send_json(200, catalogue.stats(parts[0]))
+
+    def _json_body(self) -> dict | None:
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0 or length > 64 * 1024:
+            self._send_json(400, {"error": "expected a small JSON body"})
+            return None
+        try:
+            payload = json.loads(self.rfile.read(length))
+        except ValueError:
+            self._send_json(400, {"error": "body must be JSON"})
+            return None
+        if not isinstance(payload, dict):
+            self._send_json(400, {"error": "body must be a JSON object"})
+            return None
+        return payload
+
+    def do_POST(self):
+        if not self._authorized():
+            self._send_json(401, {"error": "bad or missing admin token"})
+            return
+        parts = self._catalogue_parts()
+        if parts is None:
+            self._send_json(404, {"error": "POST is only used for /admin/catalogue/..."})
+            return
+        payload = self._json_body()
+        if payload is None:
+            return
+
+        url = str(payload.get("feed_url") or "").strip()
+        item_element = str(payload.get("item_element") or "").strip() or None
+
+        # POST /admin/catalogue/scan - preview a feed before it is saved.
+        if parts == ["scan"]:
+            try:
+                parsed = catalogue.parse_feed(catalogue.fetch_feed(url), item_element)
+            except catalogue.CatalogueError as exc:
+                self._send_json(422, {"error": str(exc)})
+                return
+            samples = [{k: v for k, v in item.items() if k != "attributes"} for item in parsed["items"][:3]]
+            self._send_json(200, {
+                "item_tag": parsed["item_tag"],
+                "item_count": len(parsed["items"]),
+                "fields": parsed["fields"],
+                "dropped_price_fields": parsed["dropped_price_fields"],
+                "samples": samples,
+            })
+            return
+
+        # POST /admin/catalogue/{id}/sync - fetch now and keep the snapshot.
+        if len(parts) == 2 and parts[1] == "sync":
+            snapshot = catalogue.sync({
+                "id": parts[0], "name": payload.get("name"), "feed_url": url,
+                "item_element": item_element, "refresh_minutes": payload.get("refresh_minutes"),
+            })
+            status = 200 if not snapshot.get("last_error") else 422
+            self._send_json(status, {**catalogue.stats(parts[0]), "error": snapshot.get("last_error")})
+            return
+
+        self._send_json(404, {"error": "use /admin/catalogue/scan or /admin/catalogue/{id}/sync"})
 
 
 def main() -> None:

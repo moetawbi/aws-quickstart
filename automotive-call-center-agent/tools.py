@@ -17,6 +17,8 @@ from datetime import date, datetime, timedelta
 
 from anthropic import beta_tool
 
+import agent_context
+import catalogue
 import data_store as db
 import retrieval
 from crm import LEAD_TYPES, get_crm
@@ -304,7 +306,8 @@ def search_service_manuals(query: str, max_results: int = 4) -> str:
             measurement, e.g. "F-150 lug nut torque" or "EcoBoost coolant capacity".
         max_results: How many passages to return (1-8, default 4).
     """
-    index = retrieval.get_index()
+    # The answering agent's manuals: shared ones plus its own folder.
+    index = retrieval.get_index(agent_context.get_agent_slug())
     if not index.chunks:
         return _json({"error": "No service manuals are loaded.", "results": []})
     max_results = max(1, min(max_results, 8))
@@ -322,6 +325,148 @@ def search_service_manuals(query: str, max_results: int = 4) -> str:
     return _json({"results": results})
 
 
+# -- insurance ------------------------------------------------------------------
+# Read-only. What comes back is decided by the CRM from the conversation's actor
+# grant: a staff member sees what their own CRM permissions allow (including
+# commission figures only with "view policy commissions"), while a customer
+# conversation gets their own cover in customer-safe terms.
+
+
+@beta_tool
+def get_customer_insurance(customer_id: str) -> str:
+    """Look up the insurance policies the dealership holds for a customer.
+
+    Use after identifying the caller with lookup_customer. Answer whether a
+    vehicle is covered from the returned "cover_state" field, NOT from
+    "status": the CRM's status column is frequently stale, and cover_state
+    reconciles it against the policy dates. When cover_state is "expired",
+    the customer is not covered no matter what status says.
+
+    Args:
+        customer_id: The CRM customer ID, as returned by lookup_customer.
+    """
+    result = CRM.get_insurance_policies(str(customer_id).strip())
+    if "error" in result:
+        return _json(result)
+    policies = result.get("data") or []
+    if not policies:
+        return _json({"policies": [], "note": f"No insurance policies on file for customer {customer_id}."})
+    return _json({"policies": policies})
+
+
+@beta_tool
+def get_insurance_policy(policy_number: str) -> str:
+    """Look up one insurance policy by its policy number.
+
+    Only for an actual policy number, which contains letters and usually a
+    slash - "MIF/895342", "MLF/1430198". A bare run of digits is NOT a policy
+    number: 7-8 digits is a Lebanese phone number (use lookup_customer) and a
+    short number on its own is usually a customer ID (use
+    get_customer_details). Do not guess with this tool.
+
+    Read cover from "cover_state", not "status" (see get_customer_insurance).
+
+    Args:
+        policy_number: The policy number as printed on the policy, e.g. "MIF/895342".
+    """
+    return _json(CRM.get_insurance_policy(str(policy_number).strip()))
+
+
+@beta_tool
+def list_insurance_products(insurance_type: str = "") -> str:
+    """List the motor insurance products and plans the dealership can sell,
+    with what each one covers. Use for "what insurance do you offer?" and
+    "what does comprehensive include?". Contains no prices - premiums depend
+    on the vehicle, so use quote_insurance for those.
+
+    Args:
+        insurance_type: Optional filter, e.g. "comprehensive", "obligatory",
+            "third_party". Leave empty for everything.
+    """
+    return _json(CRM.get_insurance_catalogue(str(insurance_type or "").strip()))
+
+
+@beta_tool
+def quote_insurance(
+    make: str,
+    model: str,
+    year: int,
+    value: float,
+    vehicle_type: str = "private",
+    deductible: float | None = None,
+    policy_period: int = 12,
+    driver_age: int | None = None,
+) -> str:
+    """Price motor insurance for a vehicle across every eligible plan,
+    cheapest first.
+
+    The figures are INDICATIVE: nothing is saved and there is no quote
+    reference. Always say the price is indicative and subject to confirmation,
+    and never promise a premium as final. If the caller wants a firm quote,
+    offer to have the insurance team follow up.
+
+    Args:
+        make: Vehicle make, e.g. "Ford".
+        model: Vehicle model, e.g. "F-150".
+        year: Model year, e.g. 2022.
+        value: The vehicle's insured value in USD. Ask the caller if unknown -
+            do not guess, it drives the whole premium.
+        vehicle_type: "private", "commercial", "motorcycle" etc. Defaults to private.
+        deductible: Optional deductible the caller wants, in USD.
+        policy_period: Months of cover, normally 12.
+        driver_age: Optional age of the main driver.
+    """
+    payload = {
+        "make": make.strip(),
+        "model": model.strip(),
+        "year": int(year),
+        "value": float(value),
+        "vehicle_type": (vehicle_type or "private").strip(),
+        "policy_period": int(policy_period or 12),
+    }
+    if deductible is not None:
+        payload["deductible"] = float(deductible)
+    if driver_age is not None:
+        payload["driver_age"] = int(driver_age)
+    return _json(CRM.quote_insurance(payload))
+
+
+# -- catalogue -------------------------------------------------------------------
+
+
+@beta_tool
+def search_catalogue(query: str = "", brand: str = "", model: str = "", min_year: int = 0) -> str:
+    """Search the products and vehicles this agent has been given a catalogue
+    of (configured on the agent in the CRM - for example a stock XML feed).
+
+    Use it for "do you have a ...?", "what Ford pickups do you have?",
+    "anything from 2020 or newer?". Recommend from what it returns and share
+    the item's link when there is one.
+
+    It never contains prices, by design. Do not state, estimate or hint at a
+    price for anything you find - say the sales team will confirm the price and
+    availability, and offer to have them follow up. Stock can sell at any time,
+    so never promise a unit is still available.
+
+    Args:
+        query: Free-text description of what the customer wants, e.g. "pickup 4x4".
+        brand: Optional brand/make filter, e.g. "Ford".
+        model: Optional model filter, e.g. "Ranger".
+        min_year: Optional earliest model year, e.g. 2020. 0 means no limit.
+    """
+    config = agent_context.get_agent_config() or {}
+    catalogues = [c for c in (config.get("catalogues") or []) if c.get("feed_url")]
+    if not catalogues:
+        return _json({"results": [], "note": "No catalogue is configured for this agent. "
+                                             "Offer to have the sales team help instead."})
+    result = catalogue.search(catalogues, query=query, brand=brand, model=model,
+                              min_year=int(min_year) or None)
+    if not result["results"] and result["unavailable_catalogues"]:
+        result["note"] = ("The catalogue could not be loaded right now. Do not guess what is in stock "
+                          "- offer to have the sales team confirm.")
+    return _json(result)
+
+
 # The full tool surface handed to the tool runner.
 TOOLS = [
     lookup_customer,
@@ -329,6 +474,11 @@ TOOLS = [
     create_lead,
     get_lead,
     search_service_manuals,
+    search_catalogue,
+    get_customer_insurance,
+    get_insurance_policy,
+    list_insurance_products,
+    quote_insurance,
     get_vehicle,
     get_service_history,
     check_recalls,
@@ -339,4 +489,27 @@ TOOLS = [
     get_customer_appointments,
     get_repair_status,
     escalate_to_human,
+]
+
+# The read-only subset, for internal (staff) conversations in the CRM chat.
+# Booking, cancelling, lead creation and escalation are withheld so that a
+# staff member exploring the agent can never write to the CRM or the
+# scheduler by accident. Keep in sync with TOOLS when adding a read tool.
+READ_ONLY_TOOLS = [
+    lookup_customer,
+    get_customer_details,
+    get_lead,
+    search_service_manuals,
+    search_catalogue,
+    get_customer_insurance,
+    get_insurance_policy,
+    list_insurance_products,
+    quote_insurance,
+    get_vehicle,
+    get_service_history,
+    check_recalls,
+    get_service_menu,
+    get_available_appointments,
+    get_customer_appointments,
+    get_repair_status,
 ]

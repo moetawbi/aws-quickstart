@@ -203,3 +203,38 @@ class FileMemoryTool(BetaAbstractMemoryTool):
                 else:
                     entry.unlink()
             return "All memory cleared."
+
+
+class ReadOnlyFileMemoryTool(FileMemoryTool):
+    """The memory directory, viewable but not writable.
+
+    Used for internal (staff) conversations in the CRM chat: staff can ask
+    what the agent has learned about a customer, but exploring must never
+    edit or delete the notes that real customer calls depend on. Every
+    mutating command returns a plain refusal, which the model handles
+    conversationally like any other tool error.
+    """
+
+    REFUSAL = (
+        "Memory is read-only in this conversation - staff chats cannot change "
+        "the agent's notes. View them instead, or edit the file from the CRM's "
+        "Agent Memory page."
+    )
+
+    def create(self, command) -> str:
+        return self.REFUSAL
+
+    def str_replace(self, command) -> str:
+        return self.REFUSAL
+
+    def insert(self, command) -> str:
+        return self.REFUSAL
+
+    def delete(self, command) -> str:
+        return self.REFUSAL
+
+    def rename(self, command) -> str:
+        return self.REFUSAL
+
+    def clear_all_memory(self) -> str:
+        return self.REFUSAL
