@@ -69,8 +69,9 @@ MODE_AUTOPILOT = "autopilot"
 ASSIST_HEADER = "🤖 AI draft (Assist) - review before sending"
 ASSIST_INSTRUCTIONS = (
     "Assist mode: an ANB advisor reads your reply and sends it themselves, so write it exactly as "
-    "it should reach the customer. You cannot create leads here - when you would, collect the "
-    "details in your reply and the advisor will create the lead."
+    "it should reach the customer, on behalf of ANB's team - do not introduce yourself or sign "
+    "with a name. You cannot create leads here - when you would, collect the details in your "
+    "reply and the advisor will create the lead."
 )
 
 

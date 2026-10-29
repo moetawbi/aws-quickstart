@@ -20,6 +20,7 @@ import os
 import sys
 import threading
 from datetime import date
+from difflib import SequenceMatcher
 
 import anthropic
 
@@ -51,6 +52,17 @@ EFFORT = os.environ.get("CALL_CENTER_EFFORT", "medium")
 MAX_TOKENS = 16000
 MAX_PAUSE_RESTARTS = 5
 
+# How a turn is delivered (see _turn_text). Owned by the runtime rather than
+# the CRM persona because it describes this code, and constant so the cached
+# system prefix stays byte-stable.
+OUTPUT_CONTRACT = (
+    "# How your replies are delivered\n\n"
+    "Everything you write in a turn - before, between and after tool calls - reaches the person "
+    "as ONE message, in order. So never narrate what you are doing (no \"let me check\", "
+    "\"one moment\", and no mention of your memory, notes or tools), never write the same thing "
+    "twice, and make the message read as one coherent reply."
+)
+
 
 def build_system_blocks(persona: str = PERSONA_CUSTOMER, config: dict | None = None) -> list[dict]:
     """System prompt plus the optional knowledge base, with the prompt-cache
@@ -67,7 +79,10 @@ def build_system_blocks(persona: str = PERSONA_CUSTOMER, config: dict | None = N
     module constants still apply, so the phone CLI and an unreachable CRM both
     keep working."""
     prompt = INTERNAL_SYSTEM_PROMPT if persona == PERSONA_INTERNAL else SYSTEM_PROMPT
-    blocks = [{"type": "text", "text": config["system_prompt"] if config else prompt}]
+    blocks = [
+        {"type": "text", "text": config["system_prompt"] if config else prompt},
+        {"type": "text", "text": OUTPUT_CONTRACT},
+    ]
     knowledge = get_knowledge_text((config or {}).get("slug"))
     if knowledge:
         blocks.append({"type": "text", "text": knowledge})
@@ -235,7 +250,8 @@ def _turn_text(assistant_messages: list[dict]) -> str:
     for message in assistant_messages:
         blocks = message["content"]
         said = [b.text.strip() for b in blocks if getattr(b, "type", None) == "text" and b.text.strip()]
-        texts += said
+        for text in said:
+            _add_text(texts, text)
         if handed_over and said:
             break
         if any(getattr(b, "type", None) == "tool_use" and getattr(b, "name", None) == "escalate_to_human"
@@ -244,6 +260,22 @@ def _turn_text(assistant_messages: list[dict]) -> str:
             if said:
                 break
     return "\n\n".join(texts)
+
+
+def _add_text(texts: list[str], text: str) -> None:
+    """Append a text block unless it repeats one already in the turn - the
+    model sometimes writes its answer, calls a tool, then writes it again.
+    Of two near-copies the fuller one is kept."""
+    norm = " ".join(text.split()).lower()
+    for i, earlier in enumerate(texts):
+        seen = " ".join(earlier.split()).lower()
+        if norm in seen:
+            return
+        if seen in norm or SequenceMatcher(None, norm, seen).ratio() > 0.85:
+            if len(norm) > len(seen):
+                texts[i] = text
+            return
+    texts.append(text)
 
 
 def _call_context() -> str:
