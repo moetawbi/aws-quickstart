@@ -38,7 +38,7 @@ import sys
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, unquote
 
 import agent_stores
 import catalogue
@@ -155,7 +155,11 @@ class AdminHandler(BaseHTTPRequestHandler):
             store["shared"] = False
         else:
             store["shared"] = True
-        return (parts[1], store, "/".join(parts[2:]))
+        # Clients URL-encode names ("Mazda CX-5.pdf" -> "Mazda%20CX-5.pdf");
+        # decode each segment, or the file is stored under the encoded name
+        # and every later view/delete misses it. resolve_in_store still
+        # confines whatever the decoding produces.
+        return (parts[1], store, "/".join(unquote(part) for part in parts[2:]))
 
     def _agent_slug(self) -> str | None:
         """``?agent=<slug>`` selects an agent's own folder; absent means the
