@@ -63,7 +63,7 @@ a mix of the two inside one word.
   https://maps.app.goo.gl/hT6DpSH8LguPb7TJ7
 - Map (ANB Motorcycles): https://goo.gl/maps/DgqjA597JNp5X3rf7
 - Mazda and Ford showroom, service center and body shop, spare parts
-- ANB Motorcycles showroom and electric bicycles
+- ANB Motorcycles showroom, motorcycle workshop and electric bicycles
 - Car rental desk (Mazda Lebanon showroom)
 - Closed on Saturday and Sunday — every brand, showroom and service center
 - Phone: +961 1 888 298
@@ -100,7 +100,8 @@ a mix of the two inside one word.
   Bekaa, Baalbek, Ras Baalbek, Hermel
 
 ### Beirut — Bechara El Khoury
-- ANB Motorcycles showroom (motorcycles and scooters)
+- ANB Motorcycles showroom (motorcycles and scooters) and motorcycle
+  workshop
 - Map: https://maps.app.goo.gl/qqnKS3nStqW6SLbLA
 - Phone: +961 1 888 298
 
@@ -109,27 +110,29 @@ a mix of the two inside one word.
 Every branch is closed on Sunday. Nahr El Mot is also always closed on
 Saturday — for every brand, the showrooms and the service center alike. A
 customer who can only come on a Saturday should go to Jal El Dib, Baabda or
-Chtaura (cars) or Jal El Dib, Bechara El Khoury or Chtaura (motorcycles).
+Chtaura (cars) or Jal El Dib, Bechara El Khoury or Chtaura (motorcycles) —
+and for a Saturday workshop visit, to the quick service in Chtaura (cars) or
+Bechara El Khoury (motorcycles).
 
 ### Cars (Mazda and Ford)
 - Showrooms and parts in Jal El Dib, Baabda and Chtaura: Monday to Friday
   8:00 am – 6:00 pm, Saturday 8:00 am – 1:00 pm
 - Nahr El Mot showroom and spare parts: Monday to Friday
   8:00 am – 6:00 pm; closed Saturday
-- Workshop: Monday to Friday 7:30 am – 5:30 pm
+- Workshops:
+  - Nahr El Mot service center and body shop: Monday to Friday
+    7:30 am – 5:30 pm; closed Saturday
+  - Chtaura quick service: Monday to Friday 7:30 am – 5:30 pm,
+    Saturday 8:00 am – 1:00 pm
 
 ### Motorcycles and scooters (ANB Motorcycles)
 - Showrooms in Jal El Dib, Bechara El Khoury and Chtaura: Monday to Friday
   8:00 am – 6:00 pm, Saturday 8:00 am – 1:00 pm
 - Nahr El Mot showroom: Monday to Friday 8:00 am – 6:00 pm; closed Saturday
-- Workshop: Monday to Friday 8:00 am – 6:00 pm
-
-### Workshops on Saturday
-Only the Nahr El Mot workshop (cars and motorcycles, including the body
-shop) is closed on Saturday. The other workshops' Saturday hours — for
-example the quick service in Chtaura — are not listed here: when a customer
-wants a Saturday visit, hand the conversation over so a colleague confirms
-the time.
+- Workshops (Nahr El Mot and Bechara El Khoury):
+  - Bechara El Khoury: Monday to Friday 8:00 am – 6:00 pm,
+    Saturday 8:00 am – 1:00 pm
+  - Nahr El Mot: Monday to Friday 8:00 am – 6:00 pm; closed Saturday
 
 ### Car rental
 Same hours as the Mazda showroom it operates from:
