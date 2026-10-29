@@ -71,6 +71,10 @@ def stores() -> dict[str, dict]:
                     "note": "chunked + BM25-indexed; searched on demand"},
         "memory": {"dir": memory_store.memory_dir(), "extensions": MEMORY_EXTENSIONS,
                    "note": "the agent's own notes; edit carefully"},
+        # Written by the CRM's knowledge sources (websites, pages), one file
+        # per page; searched with search_knowledge, never inlined.
+        "sources": {"dir": retrieval.sources_dir(), "extensions": DOC_EXTENSIONS,
+                    "note": "indexed and searched on demand with search_knowledge"},
     }
 
 
@@ -214,6 +218,7 @@ class AdminHandler(BaseHTTPRequestHandler):
             "stores": overview,
             "manual_index": {"chunks": len(index.chunks),
                              "sources": sorted({c.source for c in index.chunks})},
+            "sources_index": {"chunks": len(retrieval.get_index(slug, retrieval.sources_dir()).chunks)},
         }
 
     # -- HTTP methods ------------------------------------------------------------

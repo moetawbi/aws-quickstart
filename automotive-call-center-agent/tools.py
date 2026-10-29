@@ -251,6 +251,43 @@ def search_service_manuals(query: str, max_results: int = 4) -> str:
     return _json({"results": results})
 
 
+@beta_tool
+def search_knowledge(query: str, max_results: int = 4) -> str:
+    """Search ANB's knowledge sources - pages from ANB's websites and other
+    pages added in the CRM - for anything the knowledge base in your
+    instructions does not cover: model line-ups and trims, offers, services,
+    policies, frequently asked questions.
+
+    Returns the most relevant passages with the page's title and address.
+    Answer only from what comes back; if nothing relevant does, say you are
+    not sure and offer a colleague rather than guessing. You may give the
+    customer a page's address when it helps them.
+
+    Args:
+        query: What to look for, with specifics, e.g. "Mazda CX-30 trims"
+            or "car rental requirements".
+        max_results: How many passages to return (1-8, default 4).
+    """
+    # The answering agent's sources: shared ones plus its own folder.
+    index = retrieval.get_index(agent_context.get_agent_slug(), retrieval.sources_dir())
+    if not index.chunks:
+        return _json({"results": [], "note": "No knowledge sources are loaded."})
+    max_results = max(1, min(max_results, 8))
+    results = [
+        {
+            "page": chunk.title or chunk.source,
+            "url": chunk.url or None,
+            "section": chunk.section,
+            "relevance": round(score, 2),
+            "text": chunk.text,
+        }
+        for score, chunk in index.search(query, k=max_results)
+    ]
+    if not results:
+        return _json({"results": [], "note": "Nothing in the knowledge sources matched this query."})
+    return _json({"results": results})
+
+
 # -- insurance ------------------------------------------------------------------
 # Read-only. What comes back is decided by the CRM from the conversation's actor
 # grant: a staff member sees what their own CRM permissions allow (including
@@ -400,6 +437,7 @@ TOOLS = [
     create_lead,
     get_lead,
     search_service_manuals,
+    search_knowledge,
     search_catalogue,
     get_customer_insurance,
     get_insurance_policy,
@@ -420,6 +458,7 @@ READ_ONLY_TOOLS = [
     get_customer_details,
     get_lead,
     search_service_manuals,
+    search_knowledge,
     search_catalogue,
     get_customer_insurance,
     get_insurance_policy,

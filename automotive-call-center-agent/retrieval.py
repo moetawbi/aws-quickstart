@@ -49,6 +49,16 @@ def manuals_dir() -> Path:
     return Path(__file__).resolve().parent / "manuals"
 
 
+def sources_dir() -> Path:
+    """Knowledge sources: pages the CRM fetched from websites (one file per
+    page, a "# title" / "Source: url" header first), searched the same way as
+    manuals by search_knowledge."""
+    configured = os.environ.get("SOURCES_DIR", "").strip()
+    if configured:
+        return Path(configured)
+    return Path(__file__).resolve().parent / "sources"
+
+
 def _tokenize(text: str) -> list[str]:
     return [t for t in _WORD.findall(text.lower()) if t not in _STOPWORDS]
 
@@ -58,6 +68,8 @@ class Chunk:
     source: str    # file name
     section: str   # nearest heading, or "page N" for PDFs
     text: str
+    title: str = ""  # a source page's title (its "# " header line)
+    url: str = ""    # a source page's address (its "Source: " line)
 
 
 # ---------------------------------------------------------------------------
@@ -105,11 +117,16 @@ def _chunk_text_file(path: Path) -> list[Chunk]:
     except OSError as exc:
         print(f"[manuals] skipping {path.name}: {exc}", file=sys.stderr)
         return []
+    # A knowledge-source page opens with "# title" and "Source: url".
+    header = text.splitlines()[:2]
+    title = header[0][2:].strip() if header and header[0].startswith("# ") else ""
+    url = header[1][len("Source: "):].strip() if len(header) > 1 and header[1].startswith("Source: ") else ""
     chunks = []
     for heading, body in _split_sections(text):
         labeled = f"{heading}\n{body}" if heading else body
         for window in _window(labeled):
-            chunks.append(Chunk(source=path.name, section=heading or "(no heading)", text=window))
+            chunks.append(Chunk(source=path.name, section=heading or "(no heading)", text=window,
+                                title=title, url=url))
     return chunks
 
 
@@ -140,11 +157,12 @@ def _chunk_pdf(path: Path) -> list[Chunk]:
 MANUAL_SUFFIXES = {".pdf", ".md", ".txt", ".csv", ".json"}
 
 
-def load_chunks(agent_slug: str | None = None) -> list[Chunk]:
-    """Chunks from every manual this agent can see: the shared manuals
-    directory, then its own ``agents/<slug>/`` folder."""
+def load_chunks(agent_slug: str | None = None, root: Path | None = None) -> list[Chunk]:
+    """Chunks from every file this agent can see in a store (manuals unless
+    `root` says otherwise): the shared directory, then its own
+    ``agents/<slug>/`` folder."""
     chunks: list[Chunk] = []
-    for _name, path in agent_stores.iter_files(manuals_dir(), agent_slug, MANUAL_SUFFIXES):
+    for _name, path in agent_stores.iter_files(root or manuals_dir(), agent_slug, MANUAL_SUFFIXES):
         if path.suffix.lower() == ".pdf":
             chunks.extend(_chunk_pdf(path))
         else:
@@ -203,30 +221,33 @@ class BM25Index:
         return scored[:k]
 
 
-# One index per agent (None = the shared manuals alone), each rebuilt only
-# when something that agent can see changes on disk.
-_indexes: dict[str | None, tuple[tuple, BM25Index]] = {}
+# One index per (store, agent) - None = the shared files alone - each rebuilt
+# only when something that agent can see in that store changes on disk.
+_indexes: dict[tuple[str, str | None], tuple[tuple, BM25Index]] = {}
 
 
-def _dir_signature(agent_slug: str | None = None) -> tuple:
-    return agent_stores.signature(manuals_dir(), agent_slug, MANUAL_SUFFIXES)
+def _dir_signature(agent_slug: str | None = None, root: Path | None = None) -> tuple:
+    return agent_stores.signature(root or manuals_dir(), agent_slug, MANUAL_SUFFIXES)
 
 
-def get_index(agent_slug: str | None = None) -> BM25Index:
-    """Build an agent's index on first use and rebuild it automatically
-    whenever its manuals change on disk (e.g. a manual uploaded through the
-    admin API) - no restart or signaling needed."""
+def get_index(agent_slug: str | None = None, root: Path | None = None) -> BM25Index:
+    """Build an agent's index of a store (manuals unless `root` says
+    otherwise) on first use and rebuild it automatically whenever its files
+    change on disk (e.g. an upload through the admin API) - no restart or
+    signaling needed."""
     key = agent_stores.safe_slug(agent_slug)
-    signature = _dir_signature(key)
-    cached = _indexes.get(key)
+    root = root or manuals_dir()
+    signature = _dir_signature(key, root)
+    cached = _indexes.get((str(root), key))
     if cached is None or cached[0] != signature:
-        chunks = load_chunks(key)
+        chunks = load_chunks(key, root)
         cached = (signature, BM25Index(chunks))
-        _indexes[key] = cached
+        _indexes[(str(root), key)] = cached
         if chunks:
-            sources = sorted({c.source for c in chunks})
+            files = sorted({c.source for c in chunks})
             label = f" for {key}" if key else ""
-            print(f"[manuals] indexed {len(chunks)} chunks{label} from: {', '.join(sources)}", file=sys.stderr)
+            store = "sources" if root == sources_dir() else "manuals"
+            print(f"[{store}] indexed {len(chunks)} chunks{label} from {len(files)} file(s)", file=sys.stderr)
     return cached[1]
 
 
