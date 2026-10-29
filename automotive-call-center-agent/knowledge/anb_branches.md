@@ -109,10 +109,10 @@ a mix of the two inside one word.
 
 Every branch is closed on Sunday. Nahr El Mot is also always closed on
 Saturday — for every brand, the showrooms and the service center alike. A
-customer who can only come on a Saturday should go to Jal El Dib, Baabda or
-Chtaura (cars) or Jal El Dib, Bechara El Khoury or Chtaura (motorcycles) —
-and for a Saturday workshop visit, to the quick service in Chtaura (cars) or
-Bechara El Khoury (motorcycles).
+customer who wants a showroom on a Saturday should go to Jal El Dib, Baabda
+or Chtaura (cars) or Jal El Dib, Bechara El Khoury or Chtaura (motorcycles).
+For a Saturday workshop visit there is exactly one option per kind: the
+quick service in Chtaura (cars) or Bechara El Khoury (motorcycles).
 
 ### Cars (Mazda and Ford)
 - Showrooms and parts in Jal El Dib, Baabda and Chtaura: Monday to Friday
@@ -129,7 +129,8 @@ Bechara El Khoury (motorcycles).
 - Showrooms in Jal El Dib, Bechara El Khoury and Chtaura: Monday to Friday
   8:00 am – 6:00 pm, Saturday 8:00 am – 1:00 pm
 - Nahr El Mot showroom: Monday to Friday 8:00 am – 6:00 pm; closed Saturday
-- Workshops (Nahr El Mot and Bechara El Khoury):
+- Workshops — only Nahr El Mot and Bechara El Khoury (the Jal El Dib and
+  Chtaura motorcycle showrooms have no workshop):
   - Bechara El Khoury: Monday to Friday 8:00 am – 6:00 pm,
     Saturday 8:00 am – 1:00 pm
   - Nahr El Mot: Monday to Friday 8:00 am – 6:00 pm; closed Saturday

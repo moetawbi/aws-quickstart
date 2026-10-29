@@ -178,6 +178,7 @@ class CallCenterAgent:
 
     def send(self, user_input: str) -> str:
         self.messages.append({"role": "user", "content": user_input})
+        turn_start = len(self.messages)
 
         # The tool runner exits when no client tool ran; a long server turn
         # can end with stop_reason "pause_turn", so restart it (bounded)
@@ -216,7 +217,16 @@ class CallCenterAgent:
                 "I'm sorry, I can't help with that request. Is there anything "
                 "else I can do for your vehicle today?"
             )
-        return "\n".join(b.text for b in last.content if b.type == "text").strip()
+        # Every text block of the turn, not just the last message's: the model
+        # often says something next to a tool call ("Nahr El Mot is closed on
+        # Saturdays") and then refers back to it ("as mentioned") afterwards.
+        texts = [
+            block.text.strip()
+            for message in self.messages[turn_start:] if message["role"] == "assistant"
+            for block in message["content"]
+            if getattr(block, "type", None) == "text" and block.text.strip()
+        ]
+        return "\n\n".join(texts)
 
 
 def _call_context() -> str:
