@@ -161,14 +161,7 @@ class TrengoWorker:
             _log(f"ticket {ticket_id}: could not hand over: {result['error']}")
             return "error"
 
-        latest_id = int(latest.get("id") or 0)
-        if latest_id:
-            self.replied[ticket_id] = latest_id
-        self.handed_over[ticket_id] = {"team": team, "at": datetime.now(timezone.utc).isoformat(),
-                                       "reason": ", ".join(kinds)}
-        self.agents.pop(ticket_id, None)
-        self._save_state()
-        _log(f"ticket {ticket_id}: handed over to {team} ({', '.join(kinds)})")
+        self._record_handover(ticket_id, team, int(latest.get("id") or 0), ", ".join(kinds))
         return "handed_over"
 
     def handle_ticket(self, ticket: dict) -> str:
@@ -227,7 +220,13 @@ class TrengoWorker:
 
         if not reply.strip():
             _log(f"ticket {ticket_id}: agent produced no reply text")
-            return "error"
+            if not handed_to:
+                return "error"
+            # The ticket is already the team's: record it, or the next poll
+            # would have the agent answer a conversation it handed over.
+            if not self.dry_run:
+                self._record_handover(ticket_id, handed_to, latest_id)
+            return "handed_over"
 
         if self.dry_run:
             _log(f"ticket {ticket_id}: DRY RUN - would reply: {reply[:200]}")
@@ -238,15 +237,24 @@ class TrengoWorker:
             _log(f"ticket {ticket_id}: could not post reply: {result['error']}")
             return "error"
 
-        if latest_id:
-            self.replied[ticket_id] = latest_id
         if handed_to:
-            self.handed_over[ticket_id] = {"team": handed_to, "at": datetime.now(timezone.utc).isoformat()}
-            self.agents.pop(ticket_id, None)
-            _log(f"ticket {ticket_id}: handed over to {handed_to}")
-        self._save_state()
+            self._record_handover(ticket_id, handed_to, latest_id)
+        else:
+            if latest_id:
+                self.replied[ticket_id] = latest_id
+            self._save_state()
         _log(f"ticket {ticket_id}: replied ({len(reply)} chars)")
         return "replied"
+
+    def _record_handover(self, ticket_id: str, team: str, latest_id: int, reason: str = "") -> None:
+        """The team owns the ticket from now on: never answer it again."""
+        if latest_id:
+            self.replied[ticket_id] = latest_id
+        self.handed_over[ticket_id] = {"team": team, "at": datetime.now(timezone.utc).isoformat(),
+                                       **({"reason": reason} if reason else {})}
+        self.agents.pop(ticket_id, None)
+        self._save_state()
+        _log(f"ticket {ticket_id}: handed over to {team}" + (f" ({reason})" if reason else ""))
 
     def handle_ticket_id(self, ticket_id) -> str:
         """Webhook entry point: process one ticket known only by id. Fetches
