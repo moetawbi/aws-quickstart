@@ -138,6 +138,14 @@ class TrengoClient:
         payload = self._request("POST", f"/tickets/{ticket_id}/messages", json={"message": text})
         return payload if isinstance(payload, dict) else {"sent": True}
 
+    def remove_label(self, ticket_id, label_id) -> dict:
+        """Take a label off a ticket - the agent clears the "AI Draft" label
+        it was asked with, so an advisor can ask again. Internal, like a note."""
+        if not notes_enabled():
+            return {"error": NOTES_DISABLED}
+        payload = self._request("DELETE", f"/tickets/{ticket_id}/labels/{int(label_id)}")
+        return payload if isinstance(payload, dict) else {"removed": True}
+
     def add_note(self, ticket_id, text: str) -> dict:
         """An internal note on the ticket: visible to the team, never sent to
         the customer. Assist mode's drafts go here."""
@@ -231,6 +239,11 @@ def ticket_summary(ticket: dict) -> dict:
     channel = ticket.get("channel") or {}
     return {
         "ticket_id": ticket.get("id"),
+        # A team or a person owns it. While Trengo's chatbot runs a flow the
+        # ticket is ASSIGNED to nobody - no team, no user.
+        "owned": bool(ticket.get("team_id") or ticket.get("team") or ticket.get("user_id") or ticket.get("assignee")),
+        "labels": {str(label.get("name") or "").strip().lower(): label.get("id")
+                   for label in ticket.get("labels") or [] if isinstance(label, dict)},
         "channel_id": str(channel.get("id") or ticket.get("channel_id") or ""),
         "status": ticket.get("status", ""),
         "subject": ticket.get("subject") or "",

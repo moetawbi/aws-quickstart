@@ -1,10 +1,13 @@
 """Which agent works which Trengo inbox - Phase 3 deployments, from the CRM.
 
 ``GET {CRM_API_BASE_URL}/deployments`` lists every live deployment as
-``{channel_id, channel_name, channel_type, agent, mode}``; mode is ``assist``
-(draft an internal note for an advisor) or ``autopilot`` (answer the customer).
-The CRM already downgrades AutoPilot to Assist unless its own server allows
-it, and the worker downgrades again unless TRENGO_REPLIES_ENABLED=1.
+``{channel_id, channel_name, channel_type, agent, mode, work_when}``; mode is
+``assist`` (draft an internal note for an advisor) or ``autopilot`` (answer the
+customer). The CRM already downgrades AutoPilot to Assist unless its own
+server allows it, and the worker downgrades again unless
+TRENGO_REPLIES_ENABLED=1. ``work_when`` is ``owned`` (only once a team or a
+person owns the ticket - Trengo's chatbot runs its flows on unowned ones) or
+``always``; a row without it is treated as ``owned``.
 
 Fail closed: an inbox the CRM does not list - or any inbox while the CRM
 cannot be reached - is left to the team. Cached briefly, so a change in the

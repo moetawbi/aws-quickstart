@@ -110,16 +110,19 @@ class TicketQueue:
     def __init__(self, worker: TrengoWorker):
         self.worker = worker
         self._queue: queue.Queue[str] = queue.Queue()
-        self._pending: set[str] = set()
+        self._pending: dict[str, str] = {}  # ticket id -> draft label an advisor added ("" = routine)
         self._active = 0
         self._lock = threading.Lock()
         threading.Thread(target=self._consume, daemon=True).start()
 
-    def submit(self, ticket_id: str) -> bool:
+    def submit(self, ticket_id: str, draft_label: str = "") -> bool:
         with self._lock:
             if ticket_id in self._pending:
-                return False  # a queued (not yet started) run will see this message
-            self._pending.add(ticket_id)
+                # A queued (not yet started) run will see this message; an
+                # advisor's request upgrades it rather than being dropped.
+                self._pending[ticket_id] = self._pending[ticket_id] or draft_label
+                return False
+            self._pending[ticket_id] = draft_label
         self._queue.put(ticket_id)
         return True
 
@@ -129,10 +132,10 @@ class TicketQueue:
             # Leave _pending BEFORE handling: an event that arrives while we
             # process this ticket re-queues it, so its message isn't missed.
             with self._lock:
-                self._pending.discard(ticket_id)
+                draft_label = self._pending.pop(ticket_id, "")
                 self._active += 1
             try:
-                outcome = self.worker.handle_ticket_id(ticket_id)
+                outcome = self.worker.handle_ticket_id(ticket_id, draft_label=draft_label)
                 _log(f"ticket {ticket_id}: {outcome}")
             except Exception as exc:  # one bad ticket must not kill the consumer
                 _log(f"ticket {ticket_id}: crashed ({exc.__class__.__name__}: {exc})")
@@ -207,7 +210,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
             _log(f"ignored event without a ticket id (keys: {sorted(payload) if isinstance(payload, dict) else 'unparseable'})")
             self._respond(200, {"ignored": True})
             return
-        queued = self.server.tickets.submit(str(ticket_id))
+        # "force": the CRM relays an advisor's draft label ("AI Draft") - draft
+        # whoever owns the ticket, then take the label off. Only an
+        # authenticated caller gets here.
+        forced = isinstance(payload, dict) and payload.get("force") in (True, 1, "1", "true")
+        draft_label = (str(payload.get("label") or "").strip() or "AI Draft") if forced else ""
+        queued = self.server.tickets.submit(str(ticket_id), draft_label=draft_label)
         self._respond(200, {"queued": queued, "ticket_id": str(ticket_id)})
 
 

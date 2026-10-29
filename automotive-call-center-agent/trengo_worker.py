@@ -30,6 +30,11 @@ answers every ticket, as the template always did.
   written to the CRM. Each draft starts a fresh read-only agent fed the whole
   ticket, so it sees what the advisors actually sent. Needs
   TRENGO_NOTES_ENABLED=1.
+- A deployment's **work_when** is ``owned`` (default: only tickets a team or
+  a person owns - Trengo's chatbot runs its flows on unowned ones) or
+  ``always``. An advisor's draft label ("AI Draft", relayed by the CRM as a
+  forced ring) asks for a draft on any ticket of a deployed inbox, whatever
+  its owner or mode; the label is removed afterwards.
 - **AutoPilot** answers the customer. Every turn runs with the ticket in
   agent_context; when the agent hands a ticket over (escalate_to_human
   re-assigns it to the handover team) the worker records it and never answers
@@ -66,6 +71,11 @@ MAX_TRANSCRIPT_MESSAGES = 30
 
 MODE_ASSIST = "assist"
 MODE_AUTOPILOT = "autopilot"
+# When a deployment works a ticket: "owned" waits for a team or a person to
+# own it (Trengo's chatbot runs its service flows on unowned tickets);
+# "always" works every customer message.
+WORK_WHEN_OWNED = "owned"
+WORK_WHEN_ALWAYS = "always"
 ASSIST_HEADER = "🤖 AI draft (Assist) - review before sending"
 ASSIST_INSTRUCTIONS = (
     "Assist mode: an ANB advisor reads your reply and sends it themselves, so write it exactly as "
@@ -129,7 +139,7 @@ class TrengoWorker:
         """How this ticket's inbox is worked, or None when no agent works it.
         AutoPilot runs as Assist unless customer replies are switched on here."""
         if self.routing is None:
-            return {"agent": None, "mode": MODE_AUTOPILOT}
+            return {"agent": None, "mode": MODE_AUTOPILOT, "work_when": WORK_WHEN_ALWAYS}
         deployment = self.routing(summary["channel_id"])
         if not deployment:
             return None
@@ -223,13 +233,33 @@ class TrengoWorker:
             parts.append(label + (f":\n{reason.strip()}" if reason.strip() else "."))
         return f"{ASSIST_HEADER}\n\n" + "\n\n".join(parts) if parts else ""
 
-    def _assist(self, ticket_id: str, summary: dict, messages: list[dict], deployment: dict) -> str:
+    @staticmethod
+    def _last_customer_run(visible: list[dict]) -> list[dict]:
+        """The customer's latest run of messages, even if we replied after it -
+        what an advisor asking for a draft wants answered."""
+        end = next((i for i in range(len(visible) - 1, -1, -1) if trengo.is_inbound(visible[i])), None)
+        if end is None:
+            return []
+        start = end
+        while start > 0 and trengo.is_inbound(visible[start - 1]):
+            start -= 1
+        return visible[start:end + 1]
+
+    def _assist(self, ticket_id: str, summary: dict, messages: list[dict], deployment: dict,
+                draft_label: str = "") -> str:
         """Draft the reply to the customer's unanswered messages as an internal
         note. Nothing reaches the customer, nothing is handed over, nothing is
-        written to the CRM - the advisor decides."""
+        written to the CRM - the advisor decides.
+
+        With `draft_label` an advisor asked for this draft (the "AI Draft"
+        label): the customer's latest messages are drafted even if they were
+        drafted or answered before, and the label is taken off afterwards so
+        it can be used again."""
         visible = [m for m in messages if not trengo.is_internal_note(m)]
-        unanswered = self._unanswered(ticket_id, visible)
+        unanswered = self._last_customer_run(visible) if draft_label else self._unanswered(ticket_id, visible)
         if not any(trengo.message_text(m) or trengo.media_kind(m) for m in unanswered):
+            if draft_label:
+                self._clear_label(ticket_id, summary, draft_label)
             return "skipped"  # nothing new from the customer, or an advisor already replied
         latest_id = max(int(m.get("id") or 0) for m in unanswered)
 
@@ -238,10 +268,18 @@ class TrengoWorker:
             # The advisor has to open it anyway; a draft could only guess.
             self._mark_answered(ticket_id, latest_id)
             _log(f"ticket {ticket_id}: no draft - customer sent {', '.join(kinds)}")
+            if draft_label and not self.dry_run:
+                # Asked for: say why there is none rather than stay silent.
+                self.client.add_note(ticket_id, f"{ASSIST_HEADER}\n\nNo draft: the customer's latest message is a "
+                                                f"{' and '.join(kinds)}, which I can't open.")
+                self._clear_label(ticket_id, summary, draft_label)
             return "skipped"
 
-        history = [m for m in visible[:len(visible) - len(unanswered)] if trengo.message_text(m)]
+        start = next(i for i, m in enumerate(visible) if m is unanswered[0])
+        history = [m for m in visible[:start] if trengo.message_text(m)]
         new = "\n".join(text for text in map(trengo.message_text, unanswered) if text)
+        # Asked for after an advisor already answered: what they wrote since.
+        since = [text for text in map(trengo.message_text, visible[start + len(unanswered):]) if text]
         try:
             # A fresh agent per draft, fed the whole ticket: between drafts the
             # advisors may have written anything, and that is what it must see.
@@ -249,6 +287,9 @@ class TrengoWorker:
                                        channel=channel_kind(summary["channel_type"]))
             user_turn = (f"{self._ticket_context(summary, history, assist=True)}\n\n"
                          f"New message from the customer:\n{new}")
+            if since:
+                user_turn += ("\n\nSince then the team replied:\n" + "\n".join(f"Us: {text}" for text in since)
+                              + "\nDraft the next reply, building on what the team already said.")
             with agent_context.conversation(
                 agent_slug=getattr(agent, "agent_slug", None),
                 agent_config=getattr(agent, "config", None),
@@ -277,18 +318,38 @@ class TrengoWorker:
             return "error"
 
         self._mark_answered(ticket_id, latest_id)
-        _log(f"ticket {ticket_id}: drafted ({len(note)} chars{', handover suggested' if handed_to else ''})")
+        if draft_label:
+            self._clear_label(ticket_id, summary, draft_label)
+        _log(f"ticket {ticket_id}: drafted ({len(note)} chars{', handover suggested' if handed_to else ''}"
+             f"{', on request' if draft_label else ''})")
         return "drafted"
 
-    def handle_ticket(self, ticket: dict) -> str:
+    def _clear_label(self, ticket_id: str, summary: dict, label: str) -> None:
+        """Take the advisor's draft label off, so adding it again asks again."""
+        label_id = (summary.get("labels") or {}).get(label.strip().lower())
+        if label_id is None or self.dry_run:
+            return
+        result = self.client.remove_label(ticket_id, label_id)
+        if isinstance(result, dict) and "error" in result:
+            _log(f"ticket {ticket_id}: could not remove the {label!r} label: {result['error']}")
+
+    def handle_ticket(self, ticket: dict, draft_label: str = "") -> str:
         """Process one ticket; returns what happened (for logs/tests):
-        'replied', 'drafted', 'handed_over', 'skipped', or 'error'."""
+        'replied', 'drafted', 'handed_over', 'skipped', or 'error'.
+
+        `draft_label` is set when an advisor asked for a draft with that
+        Trengo label: it is drafted as an internal note whoever owns the
+        ticket, and whatever the inbox's mode - an advisor asked for a draft,
+        not for the customer to be answered."""
         summary = trengo.ticket_summary(ticket)
         ticket_id = str(summary["ticket_id"])
         deployment = self._deployment(summary)
         if deployment is None:
             return "skipped"  # no agent works this inbox
-        if ticket_id in self.handed_over:
+        if (deployment.get("work_when", WORK_WHEN_OWNED) == WORK_WHEN_OWNED
+                and not summary["owned"] and not draft_label):
+            return "skipped"  # nobody owns it yet - Trengo's chatbot may be running a flow
+        if ticket_id in self.handed_over and not draft_label:
             return "skipped"  # handed to the team - never answered by the agent again
 
         messages = self.client.get_messages(ticket_id)
@@ -296,8 +357,8 @@ class TrengoWorker:
             _log(f"ticket {ticket_id}: {messages.get('error', 'unexpected response')}")
             return "error"
 
-        if deployment.get("mode") == MODE_ASSIST:
-            return self._assist(ticket_id, summary, messages, deployment)
+        if deployment.get("mode") == MODE_ASSIST or draft_label:
+            return self._assist(ticket_id, summary, messages, deployment, draft_label)
 
         slug = deployment.get("agent")
 
@@ -380,7 +441,7 @@ class TrengoWorker:
         self._save_state()
         _log(f"ticket {ticket_id}: handed over to {team}" + (f" ({reason})" if reason else ""))
 
-    def handle_ticket_id(self, ticket_id) -> str:
+    def handle_ticket_id(self, ticket_id, draft_label: str = "") -> str:
         """Webhook entry point: process one ticket known only by id. Fetches
         the ticket for its metadata (falling back to a bare record if that
         fails - metadata only enriches the first turn) and runs the same
@@ -388,7 +449,7 @@ class TrengoWorker:
         ticket = self.client.get_ticket(ticket_id)
         if not isinstance(ticket, dict) or "error" in ticket or ticket.get("id") is None:
             ticket = {"id": ticket_id}
-        return self.handle_ticket(ticket)
+        return self.handle_ticket(ticket, draft_label=draft_label)
 
     # -- polling ---------------------------------------------------------------
 

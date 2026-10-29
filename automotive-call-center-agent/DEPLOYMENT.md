@@ -228,3 +228,12 @@ The CRM side is `CALL_CENTER_AGENT_RELAY_ENABLED=true` plus the token. Which
 inboxes the agent works, and in which mode, is set in the CRM (Agents →
 Deployments); the worker reads it from `GET /api/agent/deployments` and leaves
 every other inbox alone.
+
+Each deployment also says **when** it works: `owned` (default) drafts only
+once a team or a person owns the ticket - Trengo's chatbot runs its flows on
+unowned tickets - and `always` drafts every customer message. An advisor can
+ask for a draft on any ticket of a deployed inbox by adding the **AI Draft**
+label in Trengo: the CRM rings with `{"ticket_id", "force": true, "label"}`, the
+worker drafts the customer's latest messages whoever owns the ticket (team
+replies since go in as context) and then removes the label - which needs the
+API token's user to be allowed to edit labels.
