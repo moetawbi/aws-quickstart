@@ -107,12 +107,10 @@ def escalate_to_human(reason: str, priority: str = "normal", customer_id: str = 
     anything involving an accident, injury or an unsafe vehicle, requests for
     a manager, or anything the other tools cannot do.
 
-    Call it before you write anything to the customer in this turn, then
-    write ONE closing message: anything they need to know (for example that
-    the branch they asked for is closed that day and where they can go
-    instead) and that a colleague will continue here shortly. Everything you
-    write in a turn reaches the customer as a single message, so do not
-    announce the handover before calling this.
+    Write ONE closing message to the customer - anything they need to know
+    (for example that the branch they asked for is closed that day and where
+    they can go instead) and that a colleague will continue here shortly -
+    either together with this call or right after it, never both.
 
     Args:
         reason: Everything the colleague needs so the customer never repeats
@@ -154,12 +152,12 @@ def escalate_to_human(reason: str, priority: str = "normal", customer_id: str = 
     # The colleague reads the note as what the customer was told, so the
     # last reply must carry anything the note says was advised.
     return _json({"handed_over": True, "team": team,
-                  "next": "Now write your one closing message: anything your reason says the "
+                  "next": "If you wrote your closing message together with this call, you are done - "
+                          "write nothing more. Otherwise write it now: anything your reason says the "
                           "customer was told or advised that they have not actually seen from you yet "
                           "(for example that the branch is closed that day and where to go instead), "
-                          "and that a colleague will continue this conversation here shortly. Leave out "
-                          "whatever you already wrote this turn - it reaches them in the same message. "
-                          "Then stop: you will not answer anything further on this conversation."})
+                          "and that a colleague will continue this conversation here shortly. Then "
+                          "stop: you will not answer anything further on this conversation."})
 
 
 @beta_tool

@@ -217,16 +217,27 @@ class CallCenterAgent:
                 "I'm sorry, I can't help with that request. Is there anything "
                 "else I can do for your vehicle today?"
             )
-        # Every text block of the turn, not just the last message's: the model
-        # often says something next to a tool call ("Nahr El Mot is closed on
-        # Saturdays") and then refers back to it ("as mentioned") afterwards.
-        texts = [
-            block.text.strip()
-            for message in self.messages[turn_start:] if message["role"] == "assistant"
-            for block in message["content"]
-            if getattr(block, "type", None) == "text" and block.text.strip()
-        ]
-        return "\n\n".join(texts)
+        return _turn_text([m for m in self.messages[turn_start:] if m["role"] == "assistant"])
+
+
+def _turn_text(assistant_messages: list[dict]) -> str:
+    """Every text block of the turn, not just the last message's: the model
+    often says something next to a tool call ("Nahr El Mot is closed on
+    Saturdays") and then refers back to it ("as mentioned") afterwards.
+
+    One exception: when the model writes its closing message together with
+    the escalate_to_human call, whatever it adds after the handover is a
+    repeat ("Handed over - a colleague will take it from here"), so drop it.
+    """
+    texts: list[str] = []
+    for message in assistant_messages:
+        blocks = message["content"]
+        texts += [b.text.strip() for b in blocks if getattr(b, "type", None) == "text" and b.text.strip()]
+        handed_over_here = any(getattr(b, "type", None) == "tool_use" and getattr(b, "name", None) == "escalate_to_human"
+                               for b in blocks)
+        if handed_over_here and any(getattr(b, "type", None) == "text" and b.text.strip() for b in blocks):
+            break
+    return "\n\n".join(texts)
 
 
 def _call_context() -> str:
