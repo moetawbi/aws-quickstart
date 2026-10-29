@@ -61,14 +61,13 @@ import sys
 import threading
 import time
 import uuid
-from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import anthropic
 
 import agent_config
 import agent_context
-from agent import PERSONA_CUSTOMER, PERSONA_INTERNAL, PERSONAS, CallCenterAgent
+from agent import CHANNEL_MESSAGING, PERSONA_CUSTOMER, PERSONA_INTERNAL, PERSONAS, CallCenterAgent, local_now
 
 BIND = os.environ.get("CHAT_API_BIND", "127.0.0.1")
 PORT = int(os.environ.get("CHAT_API_PORT", "8082"))
@@ -97,8 +96,11 @@ class Session:
         # Config is snapshotted here, for the life of the session.
         self.agent_slug = agent_slug
         self.config = agent_config.fetch_or_none(agent_slug) if agent_config.available() else None
+        # A customer conversation here is chat (or an eval replay of WhatsApp),
+        # so the messaging rules apply; staff chat gets neither channel's.
         self.agent = CallCenterAgent(persona=persona, read_only=read_only, config=self.config,
-                                     handover_rehearsal=handover_rehearsal)
+                                     handover_rehearsal=handover_rehearsal,
+                                     channel=CHANNEL_MESSAGING if persona == PERSONA_CUSTOMER else None)
         self.created = time.time()
         self.last_used = self.created
         self.turns = 0
@@ -169,13 +171,13 @@ def opening_context(persona: str, read_only: bool, context: dict,
                     handover_rehearsal: bool = False) -> str:
     """First user turn of a session: channel metadata, injected here rather
     than in the system prompt so the cached prefix stays byte-stable."""
-    today = date.today().isoformat()
+    now = local_now()
 
     if persona == PERSONA_INTERNAL:
         who = str(context.get("user_name") or "a staff member")
         role = str(context.get("user_role") or "")
         lines = [
-            f"[Chat metadata - not written by the person] Today's date: {today}. "
+            f"[Chat metadata - not written by the person] Now (Lebanon time): {now}. "
             f"Channel: CRM internal chat (written, staff-facing). You are talking to {who}"
             + (f", role: {role}" if role else "")
             + ", already authenticated by the CRM.",
@@ -190,7 +192,7 @@ def opening_context(persona: str, read_only: bool, context: dict,
     # agent knows which line the customer is already writing on.
     channel = " ".join(str(context.get("channel") or "").split())[:120] or "web chat"
     lines = [
-        f"[Chat metadata - not written by the caller] Today's date: {today}. "
+        f"[Chat metadata - not written by the caller] Now (Lebanon time): {now}. "
         f"Channel: {channel} (written conversation - reply in the customer's language, "
         "no greeting on every message, keep it brief).",
     ]

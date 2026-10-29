@@ -19,8 +19,9 @@ import argparse
 import os
 import sys
 import threading
-from datetime import date
+from datetime import datetime
 from difflib import SequenceMatcher
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import anthropic
 
@@ -63,8 +64,53 @@ OUTPUT_CONTRACT = (
     "twice, and make the message read as one coherent reply."
 )
 
+# What a conversation arrives on, for the rules that apply to one kind only:
+# "email", "messaging" (WhatsApp, chat, social DMs) or None (phone, staff chat).
+CHANNEL_EMAIL = "email"
+CHANNEL_MESSAGING = "messaging"
 
-def build_system_blocks(persona: str = PERSONA_CUSTOMER, config: dict | None = None) -> list[dict]:
+# Where opening hours and "today" are measured (the business's local time).
+LOCAL_TIMEZONE = os.environ.get("AGENT_TIMEZONE", "Asia/Beirut")
+
+
+def local_now() -> str:
+    """'Thursday 2026-10-29, 17:40' in local time. Stated in every
+    conversation's metadata so the agent never derives a weekday itself."""
+    try:
+        now = datetime.now(ZoneInfo(LOCAL_TIMEZONE))
+    except ZoneInfoNotFoundError:
+        now = datetime.now()
+    return now.strftime("%A %Y-%m-%d, %H:%M")
+
+
+def channel_kind(channel_type: str | None) -> str:
+    """Trengo's channel type -> the kind the channel-specific rules use."""
+    return CHANNEL_EMAIL if str(channel_type or "").upper() == "EMAIL" else CHANNEL_MESSAGING
+
+
+def rules_block(config: dict | None, persona: str, channel: str | None) -> str | None:
+    """The CRM's built-in rules that fit this conversation, then the agent's
+    own rules for this kind of channel. Constant per (agent, persona,
+    channel), so each combination keeps a byte-stable cached prefix."""
+    config = config or {}
+    applies = [
+        rule for rule in config.get("system_rules") or []
+        if rule.get("channel") in ("all", channel)
+        and (rule.get("audience") == "everyone" or persona == PERSONA_CUSTOMER)
+    ]
+    parts = []
+    if applies:
+        parts.append("# Rules every agent follows\n\nThese apply to every reply in this conversation.\n\n"
+                     + "\n\n".join(f"## {rule.get('title', '').strip()}\n{rule.get('text', '').strip()}"
+                                   for rule in applies))
+    own = ((config.get("channel_rules") or {}).get(channel) or []) if channel else []
+    if own:
+        parts.append(f"# Rules for {channel} conversations\n\n" + "\n".join(f"- {rule.strip()}" for rule in own))
+    return "\n\n".join(parts) or None
+
+
+def build_system_blocks(persona: str = PERSONA_CUSTOMER, config: dict | None = None,
+                        channel: str | None = None) -> list[dict]:
     """System prompt plus the optional knowledge base, with the prompt-cache
     breakpoint on the last block so the whole prefix is cached. Each new
     conversation snapshots the current knowledge (get_knowledge_text reloads
@@ -83,6 +129,9 @@ def build_system_blocks(persona: str = PERSONA_CUSTOMER, config: dict | None = N
         {"type": "text", "text": config["system_prompt"] if config else prompt},
         {"type": "text", "text": OUTPUT_CONTRACT},
     ]
+    rules = rules_block(config, persona, channel)
+    if rules:
+        blocks.append({"type": "text", "text": rules})
     knowledge = get_knowledge_text((config or {}).get("slug"))
     if knowledge:
         blocks.append({"type": "text", "text": knowledge})
@@ -142,7 +191,8 @@ class CallCenterAgent:
 
     def __init__(self, client: anthropic.Anthropic | None = None,
                  persona: str = PERSONA_CUSTOMER, read_only: bool | None = None,
-                 config: dict | None = None, handover_rehearsal: bool = False):
+                 config: dict | None = None, handover_rehearsal: bool = False,
+                 channel: str | None = None):
         """persona picks the brain (customer-facing "Alex" vs the internal
         staff assistant); read_only picks the tool surface. They are separate
         because a staff member previewing the customer experience wants the
@@ -166,7 +216,9 @@ class CallCenterAgent:
         self.config = config
         self.agent_slug = (config or {}).get("slug")
         self.messages: list[dict] = []
-        self.system_blocks = build_system_blocks(persona, config)  # per-conversation snapshot
+        # Per-conversation snapshot; `channel` ("email", "messaging" or None)
+        # picks the rules that apply to this kind of conversation.
+        self.system_blocks = build_system_blocks(persona, config, channel)
         self.model = (config or {}).get("model") or MODEL
         self.effort = (config or {}).get("effort") or EFFORT
         # Read-only surface: no booking, cancelling, lead creation or
@@ -282,7 +334,7 @@ def _call_context() -> str:
     """Per-call context, injected as the first user turn (not the system
     prompt) so the cached system prefix stays byte-stable across calls."""
     return (
-        f"[Call metadata - not spoken by the caller] Today's date: {date.today().isoformat()}. "
+        f"[Call metadata - not spoken by the caller] Now (local time): {local_now()}. "
         "Channel: phone. Greet the caller now."
     )
 

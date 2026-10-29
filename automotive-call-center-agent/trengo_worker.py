@@ -50,14 +50,14 @@ import json
 import os
 import sys
 import time
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import agent_config
 import agent_context
 import deployments
 import trengo
-from agent import CallCenterAgent, agent_for
+from agent import CallCenterAgent, agent_for, channel_kind, local_now
 
 POLL_SECONDS = float(os.environ.get("TRENGO_POLL_SECONDS", "20"))
 TICKET_STATUS = os.environ.get("TRENGO_TICKET_STATUS", "OPEN")
@@ -144,7 +144,7 @@ class TrengoWorker:
         # line the customer is already writing on.
         channel = " - ".join(filter(None, [summary["channel_type"], summary["channel_name"]])) or "messaging"
         lines = [
-            f"[Ticket metadata - not written by the customer] Today's date: {date.today().isoformat()}. "
+            f"[Ticket metadata - not written by the customer] Now (Lebanon time): {local_now()}. "
             f"Channel: Trengo {channel} (written conversation - reply in the customer's language, "
             "no greetings on every message, keep it brief).",
         ]
@@ -245,7 +245,8 @@ class TrengoWorker:
         try:
             # A fresh agent per draft, fed the whole ticket: between drafts the
             # advisors may have written anything, and that is what it must see.
-            agent = self.agent_factory(deployment.get("agent"), read_only=True, handover_rehearsal=True)
+            agent = self.agent_factory(deployment.get("agent"), read_only=True, handover_rehearsal=True,
+                                       channel=channel_kind(summary["channel_type"]))
             user_turn = (f"{self._ticket_context(summary, history, assist=True)}\n\n"
                          f"New message from the customer:\n{new}")
             with agent_context.conversation(
@@ -321,7 +322,7 @@ class TrengoWorker:
         agent = self.agents.get(ticket_id)
         try:
             if agent is None:
-                agent = self.agent_factory(slug)
+                agent = self.agent_factory(slug, channel=channel_kind(summary["channel_type"]))
                 self.agents[ticket_id] = agent
                 context = self._ticket_context(summary, spoken[:-1])
                 user_turn = f"{context}\n\nNew message from the customer:\n{trengo.message_text(latest)}"
