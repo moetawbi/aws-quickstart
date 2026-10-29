@@ -106,7 +106,9 @@ def escalate_to_human(reason: str, priority: str = "normal", customer_id: str = 
     service-history questions, workshop prices, disputes, complaints,
     anything involving an accident, injury or an unsafe vehicle, requests for
     a manager, or anything the other tools cannot do. Afterwards tell the
-    customer a colleague will continue here shortly, and say nothing more.
+    customer a colleague will continue here shortly - together with anything
+    your reason says you told or advised them that they have not actually
+    heard from you yet - and say nothing more.
 
     Args:
         reason: Everything the colleague needs so the customer never repeats
@@ -145,9 +147,15 @@ def escalate_to_human(reason: str, priority: str = "normal", customer_id: str = 
         return _json(result)
 
     agent_context.mark_handed_over(team, note)
+    # The colleague reads the note as what the customer was told, so the
+    # last reply must carry anything the note says was advised.
     return _json({"handed_over": True, "team": team,
-                  "next": "Tell the customer a colleague will continue this conversation here shortly. "
-                          "Do not answer anything further."})
+                  "next": "In this reply, tell the customer a colleague will continue this "
+                          "conversation here shortly. If your reason mentions something you told or "
+                          "advised the customer that they have not actually seen from you yet - for "
+                          "example that the branch they asked for is closed that day and where they "
+                          "can go instead - say it now, briefly. Then stop: you will not answer "
+                          "anything further on this conversation."})
 
 
 @beta_tool
