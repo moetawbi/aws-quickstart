@@ -28,7 +28,7 @@ import agent_stores
 from knowledge import get_knowledge_text
 from memory_store import FileMemoryTool, ReadOnlyFileMemoryTool, memory_dir
 from prompts import INTERNAL_SYSTEM_PROMPT, SYSTEM_PROMPT
-from tools import READ_ONLY_TOOLS, TOOLS
+from tools import READ_ONLY_TOOLS, TOOLS, escalate_to_human
 
 # One shared memory store: what the agent learns in any conversation
 # (phone or Trengo) is available to every later conversation.
@@ -127,13 +127,18 @@ class CallCenterAgent:
 
     def __init__(self, client: anthropic.Anthropic | None = None,
                  persona: str = PERSONA_CUSTOMER, read_only: bool | None = None,
-                 config: dict | None = None):
+                 config: dict | None = None, handover_rehearsal: bool = False):
         """persona picks the brain (customer-facing "Alex" vs the internal
         staff assistant); read_only picks the tool surface. They are separate
         because a staff member previewing the customer experience wants the
         customer brain without the power to book a real appointment or create
         a real CRM lead. read_only defaults to True for internal chats and
-        False for real customer channels (phone, Trengo)."""
+        False for real customer channels (phone, Trengo).
+
+        handover_rehearsal gives a read-only customer conversation
+        escalate_to_human back, for the eval: the caller must run each turn
+        with a dry-run Trengo context, so the handover is recorded but no
+        ticket is touched."""
         if persona not in PERSONAS:
             raise ValueError(f"unknown persona {persona!r}; use one of {PERSONAS}")
         if read_only is None:
@@ -152,7 +157,10 @@ class CallCenterAgent:
         # Read-only surface: no booking, cancelling, lead creation or
         # escalation, and memory can be viewed but never edited.
         memory = memory_tool_for(config, read_only)
-        self.tools = [*(READ_ONLY_TOOLS if read_only else TOOLS), memory]
+        tools = list(READ_ONLY_TOOLS if read_only else TOOLS)
+        if read_only and handover_rehearsal and persona == PERSONA_CUSTOMER:
+            tools.append(escalate_to_human)
+        self.tools = [*tools, memory]
 
         # An agent config may narrow the surface further. `tools` absent/null
         # means "not configured" and keeps the full surface; a list - even an

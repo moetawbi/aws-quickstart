@@ -24,6 +24,12 @@ The agent is the CRM's default agent (its prompt, skills and handover team),
 and every turn runs with the ticket in agent_context. When the agent hands a
 ticket over (escalate_to_human re-assigns it to the handover team), the
 worker records it and never answers that ticket again - the team owns it.
+
+Voice notes, photos, videos and files never reach the model: the agent can
+only read text, and a voice note is usually the whole request. When the
+customer's unanswered messages include one, the worker re-assigns the
+ticket to the handover team itself, with a note saying what was sent, and
+posts nothing - a colleague replies in the same conversation.
 """
 
 from __future__ import annotations
@@ -96,7 +102,9 @@ class TrengoWorker:
     def _ticket_context(self, summary: dict, history: list[dict]) -> str:
         """First user turn for a new agent session on this ticket: channel
         metadata plus a replay of any conversation that predates this worker."""
-        channel = summary["channel_type"] or summary["channel_name"] or "messaging"
+        # The channel's name carries its number, so the agent knows which
+        # line the customer is already writing on.
+        channel = " - ".join(filter(None, [summary["channel_type"], summary["channel_name"]])) or "messaging"
         lines = [
             f"[Ticket metadata - not written by the customer] Today's date: {date.today().isoformat()}. "
             f"Channel: Trengo {channel} (written conversation - reply in the customer's language, "
@@ -117,9 +125,55 @@ class TrengoWorker:
                     lines.append(f"{who}: {text}")
         return "\n".join(lines)
 
+    def _unanswered(self, ticket_id: str, visible: list[dict]) -> list[dict]:
+        """The customer's messages since our last one that the agent has not
+        answered yet, oldest first."""
+        answered = self.replied.get(ticket_id, -1)
+        run: list[dict] = []
+        for message in reversed(visible):
+            message_id = int(message.get("id") or 0)
+            if not trengo.is_inbound(message) or (message_id and message_id <= answered):
+                break
+            run.append(message)
+        return run[::-1]
+
+    def _hand_over_media(self, ticket_id: str, latest: dict, kinds: list[str]) -> str | None:
+        """Hand the ticket to the team because the customer sent something
+        the agent cannot open. Returns the outcome, or None when the agent
+        has no handover team - then the agent answers as usual."""
+        agent = self.agents.get(ticket_id) or self.agent_factory()
+        handover = (getattr(agent, "config", None) or {}).get("handover") or {}
+        team_id = handover.get("trengo_team_id")
+        if not team_id:
+            _log(f"ticket {ticket_id}: customer sent {', '.join(kinds)} but the agent has no handover team")
+            return None
+        team = handover.get("trengo_team_name") or f"team {team_id}"
+        note = ("AI agent handover (normal)\n"
+                f"The customer sent: {', '.join(kinds)}. The AI agent can only read text, "
+                "so a colleague needs to open it and continue this conversation.")
+
+        if self.dry_run:
+            _log(f"ticket {ticket_id}: DRY RUN - would hand over to {team}: {', '.join(kinds)}")
+            return "handed_over"
+
+        result = self.client.assign_ticket(ticket_id, int(team_id), note)
+        if isinstance(result, dict) and "error" in result:
+            _log(f"ticket {ticket_id}: could not hand over: {result['error']}")
+            return "error"
+
+        latest_id = int(latest.get("id") or 0)
+        if latest_id:
+            self.replied[ticket_id] = latest_id
+        self.handed_over[ticket_id] = {"team": team, "at": datetime.now(timezone.utc).isoformat(),
+                                       "reason": ", ".join(kinds)}
+        self.agents.pop(ticket_id, None)
+        self._save_state()
+        _log(f"ticket {ticket_id}: handed over to {team} ({', '.join(kinds)})")
+        return "handed_over"
+
     def handle_ticket(self, ticket: dict) -> str:
         """Process one ticket; returns what happened (for logs/tests):
-        'replied', 'skipped', or 'error'."""
+        'replied', 'handed_over', 'skipped', or 'error'."""
         summary = trengo.ticket_summary(ticket)
         ticket_id = str(summary["ticket_id"])
         if ticket_id in self.handed_over:
@@ -129,6 +183,16 @@ class TrengoWorker:
         if isinstance(messages, dict):
             _log(f"ticket {ticket_id}: {messages.get('error', 'unexpected response')}")
             return "error"
+
+        # A voice note or photo goes straight to the team - no model call.
+        visible = [m for m in messages if not trengo.is_internal_note(m)]
+        unanswered = self._unanswered(ticket_id, visible)
+        kinds = list(dict.fromkeys(kind for kind in map(trengo.media_kind, unanswered) if kind))
+        if kinds:
+            outcome = self._hand_over_media(ticket_id, unanswered[-1], kinds)
+            if outcome:
+                return outcome
+
         spoken = [m for m in messages if not trengo.is_internal_note(m) and trengo.message_text(m)]
         if not spoken or not trengo.is_inbound(spoken[-1]):
             return "skipped"  # nothing new from the customer
@@ -197,7 +261,7 @@ class TrengoWorker:
     # -- polling ---------------------------------------------------------------
 
     def poll_once(self) -> dict:
-        stats = {"replied": 0, "skipped": 0, "error": 0}
+        stats = {"replied": 0, "handed_over": 0, "skipped": 0, "error": 0}
         tickets = self.client.list_tickets(status=TICKET_STATUS)
         if isinstance(tickets, dict):
             _log(tickets.get("error", "could not list tickets"))
@@ -217,7 +281,7 @@ class TrengoWorker:
         while True:
             try:
                 stats = self.poll_once()
-                if stats["replied"] or stats["error"]:
+                if stats["replied"] or stats["handed_over"] or stats["error"]:
                     _log(f"cycle: {stats}")
             except Exception as exc:  # a bad cycle must not kill the worker
                 _log(f"cycle failed ({exc.__class__.__name__}: {exc})")

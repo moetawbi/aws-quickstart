@@ -59,6 +59,9 @@ a mix of the two inside one word.
 
 ### Nahr El Mot — headquarters
 - Address: Metn Express Highway, Nahr El Mot, Antelias
+- Map (cars — showroom, service center and body shop):
+  https://maps.app.goo.gl/hT6DpSH8LguPb7TJ7
+- Map (ANB Motorcycles): https://goo.gl/maps/DgqjA597JNp5X3rf7
 - Mazda and Ford showroom, service center and body shop, spare parts
 - ANB Motorcycles showroom and electric bicycles
 - Car rental desk (Mazda Lebanon showroom)
@@ -68,6 +71,9 @@ a mix of the two inside one word.
 
 ### Jal El Dib — seaside
 - Address: Sea Side Road, Jal El Dib, Metn (Boukather Center)
+- Map (Mazda showroom): https://maps.app.goo.gl/Yi5FxDXmqsZwsZje7
+- Map (Ford showroom): https://maps.app.goo.gl/orXGcb6bpJy1WrNe9
+- Map (ANB Motorcycles): https://goo.gl/maps/A3zbH74YVqyvgoAcA
 - Mazda Lebanon showroom and Ford Lebanon main showroom
 - ANB Motorcycles showroom and electric bicycles
 - Car rental desk (Mazda Lebanon showroom)
@@ -78,6 +84,7 @@ a mix of the two inside one word.
 
 ### Baabda
 - Address: Beirut–Damascus International Highway, Baabda
+- Map: https://maps.app.goo.gl/tFiDvk4RFKBVT7Di9
 - Car showroom (Mazda sales and parts)
 - Phone: +961 1 888 298
 - Nearest branch for: Baabda, Hazmieh, Furn el Chebbak, Kfarshima, Aley,
@@ -85,6 +92,7 @@ a mix of the two inside one word.
 
 ### Chtaura — Beqaa
 - Address: Chtaura main road, near Coop — Nassar Palace
+- Map (cars and motorcycles): https://goo.gl/maps/cHoyTT9PJFPGsPj76
 - Car showroom (Mazda sales, parts and quick service) and ANB Motorcycles
   showroom
 - Phone: +961 1 888 298
@@ -93,6 +101,7 @@ a mix of the two inside one word.
 
 ### Beirut — Bechara El Khoury
 - ANB Motorcycles showroom (motorcycles and scooters)
+- Map: https://maps.app.goo.gl/qqnKS3nStqW6SLbLA
 - Phone: +961 1 888 298
 
 ## Opening hours
@@ -105,15 +114,22 @@ Chtaura (cars) or Jal El Dib, Bechara El Khoury or Chtaura (motorcycles).
 ### Cars (Mazda and Ford)
 - Showrooms and parts in Jal El Dib, Baabda and Chtaura: Monday to Friday
   8:00 am – 6:00 pm, Saturday 8:00 am – 1:00 pm
-- Nahr El Mot — sales, service and spare parts: Monday to Friday
+- Nahr El Mot showroom and spare parts: Monday to Friday
   8:00 am – 6:00 pm; closed Saturday
-- Workshop (service, including quick service in Chtaura): Monday to Friday
-  8:00 am – 5:30 pm; closed Saturday
+- Workshop: Monday to Friday 7:30 am – 5:30 pm
 
 ### Motorcycles and scooters (ANB Motorcycles)
-- Jal El Dib, Bechara El Khoury and Chtaura: Monday to Friday
+- Showrooms in Jal El Dib, Bechara El Khoury and Chtaura: Monday to Friday
   8:00 am – 6:00 pm, Saturday 8:00 am – 1:00 pm
-- Nahr El Mot: Monday to Friday 8:00 am – 6:00 pm; closed Saturday
+- Nahr El Mot showroom: Monday to Friday 8:00 am – 6:00 pm; closed Saturday
+- Workshop: Monday to Friday 8:00 am – 6:00 pm
+
+### Workshops on Saturday
+Only the Nahr El Mot workshop (cars and motorcycles, including the body
+shop) is closed on Saturday. The other workshops' Saturday hours — for
+example the quick service in Chtaura — are not listed here: when a customer
+wants a Saturday visit, hand the conversation over so a colleague confirms
+the time.
 
 ### Car rental
 Same hours as the Mazda showroom it operates from:
@@ -122,14 +138,19 @@ Same hours as the Mazda showroom it operates from:
 
 ## Finding the closest branch
 
+When a customer asks where a branch is, give its address and its map link
+— for the department they want (a car showroom, the motorcycle showroom or
+the workshop).
+
 Match the customer's town against the "Nearest branch for" lists. If their
 town is not listed, ask which area they are in and suggest the branch whose
 address is closest; for motorcycles in Beirut, Bechara El Khoury is the
 city showroom. If you are still unsure, give the main number,
 +961 1 888 298.
 
-Sources: anbholding.com (Contact Us and Mobility), mazdalb.com (dealer
-locator: departments and email), en.fordlb.com (Contact: car hours, which
-ANB applies to Mazda too), the ANB Motorcycles Google Maps listings linked
-from anbholding.com, and the CRM's branch register — checked
-29 October 2026.
+Sources: anbholding.com (Contact Us — addresses and map links — and
+Mobility), mazdalb.com (dealer locator: departments and email),
+en.fordlb.com (Contact: showroom hours, which ANB applies to Mazda too),
+the ANB Motorcycles Google Maps listings linked from anbholding.com, the
+CRM's branch register, and ANB's own confirmation of the workshop hours —
+checked 29 October 2026.

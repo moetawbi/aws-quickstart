@@ -35,8 +35,9 @@ _agent_slug: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 _agent_config: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
     "agent_config", default=None
 )
-# {"ticket_id": str, "dry_run": bool, "handed_over": str | None} - a mutable
-# dict, so a tool can record the handover for the worker to read after the turn.
+# {"ticket_id": str, "dry_run": bool, "handed_over": str | None, "note": str}
+# - a mutable dict, so a tool can record the handover for the worker (or the
+# chat API's rehearsal) to read after the turn.
 _trengo: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
     "trengo", default=None
 )
@@ -68,22 +69,30 @@ def get_trengo_ticket_id() -> str | None:
 
 
 def trengo_dry_run() -> bool:
-    """True when the worker runs with --dry-run: tools must not touch Trengo."""
+    """True when tools must not touch Trengo: the worker's --dry-run, and the
+    chat API's handover rehearsal (which has no real ticket at all)."""
     ticket = _trengo.get()
     return bool(ticket and ticket.get("dry_run"))
 
 
-def mark_handed_over(team: str) -> None:
+def mark_handed_over(team: str, note: str = "") -> None:
     """Called by escalate_to_human once the ticket is re-assigned."""
     ticket = _trengo.get()
     if ticket is not None:
         ticket["handed_over"] = team
+        ticket["note"] = note
 
 
 def handed_over() -> str | None:
     """The team this turn handed the ticket to, if it did."""
     ticket = _trengo.get()
     return ticket.get("handed_over") if ticket else None
+
+
+def handover_note() -> str:
+    """The note the handover left for the team ("" when there was none)."""
+    ticket = _trengo.get()
+    return (ticket or {}).get("note") or ""
 
 
 def set_customer_id(customer_id: str | None) -> None:
@@ -104,7 +113,7 @@ def conversation(actor_grant: str | None = None, customer_id: str | None = None,
     agent_token = _agent_slug.set(agent_slug or None)
     config_token = _agent_config.set(agent_config or None)
     trengo_token = _trengo.set(
-        {"ticket_id": str(trengo_ticket_id), "dry_run": trengo_dry_run, "handed_over": None}
+        {"ticket_id": str(trengo_ticket_id), "dry_run": trengo_dry_run, "handed_over": None, "note": ""}
         if trengo_ticket_id else None
     )
     try:

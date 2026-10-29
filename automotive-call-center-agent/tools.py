@@ -144,7 +144,7 @@ def escalate_to_human(reason: str, priority: str = "normal", customer_id: str = 
     if isinstance(result, dict) and "error" in result:
         return _json(result)
 
-    agent_context.mark_handed_over(team)
+    agent_context.mark_handed_over(team, note)
     return _json({"handed_over": True, "team": team,
                   "next": "Tell the customer a colleague will continue this conversation here shortly. "
                           "Do not answer anything further."})

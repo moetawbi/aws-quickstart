@@ -16,13 +16,21 @@ POST /chat body::
     {"session_id": "crm-42",        # optional; generated when omitted
      "persona": "internal",         # customer | internal   (default customer)
      "read_only": true,             # optional; defaults per persona
+     "handover": "dry_run",         # optional; customer persona only - see below
      "message": "what do we know about 70200605?",
-     "context": {"user_name": "Moe Tawbi", "user_role": "sales_manager"}}
+     "context": {"user_name": "Moe Tawbi", "user_role": "sales_manager",
+                 "channel": "WhatsApp Call Center (+961 79 111 423)"}}  # channel: customer persona
 
 Response::
 
     {"session_id": "crm-42", "persona": "internal", "read_only": true,
-     "reply": "...", "tools_used": ["lookup_customer"], "turns": 3, "new_session": false}
+     "reply": "...", "tools_used": ["lookup_customer"], "turns": 3, "new_session": false,
+     "handover": null}              # or {"team": ..., "note": ...} when rehearsed
+
+``"handover": "dry_run"`` is the eval's handover rehearsal: a read-only
+customer conversation gets escalate_to_human back, run against no real
+ticket, and the response reports the team and note it would have handed
+the conversation to. Nothing reaches Trengo - there is no live mode here.
 
 Design notes:
 
@@ -77,17 +85,20 @@ class Session:
     """One conversation: the agent plus its bookkeeping."""
 
     def __init__(self, session_id: str, persona: str, read_only: bool,
-                 actor_grant: str | None = None, agent_slug: str | None = None):
+                 actor_grant: str | None = None, agent_slug: str | None = None,
+                 handover_rehearsal: bool = False):
         self.id = session_id
         self.persona = persona
         self.read_only = read_only
+        self.handover_rehearsal = handover_rehearsal
         # Opaque to us: the CRM issued it, the CRM reads it. Held for the
         # session so every turn is attributed to the same staff member.
         self.actor_grant = actor_grant
         # Config is snapshotted here, for the life of the session.
         self.agent_slug = agent_slug
         self.config = agent_config.fetch_or_none(agent_slug) if agent_config.available() else None
-        self.agent = CallCenterAgent(persona=persona, read_only=read_only, config=self.config)
+        self.agent = CallCenterAgent(persona=persona, read_only=read_only, config=self.config,
+                                     handover_rehearsal=handover_rehearsal)
         self.created = time.time()
         self.last_used = self.created
         self.turns = 0
@@ -113,7 +124,8 @@ class SessionStore:
 
     def get_or_create(self, session_id: str, persona: str, read_only: bool,
                       actor_grant: str | None = None,
-                      agent_slug: str | None = None) -> tuple[Session, bool]:
+                      agent_slug: str | None = None,
+                      handover_rehearsal: bool = False) -> tuple[Session, bool]:
         with self._lock:
             self._evict_locked()
             existing = self._sessions.get(session_id)
@@ -122,7 +134,8 @@ class SessionStore:
             # A different agent is a different conversation, like a persona change.
             if existing and (existing.persona != persona
                              or existing.read_only != read_only
-                             or existing.agent_slug != agent_slug):
+                             or existing.agent_slug != agent_slug
+                             or existing.handover_rehearsal != handover_rehearsal):
                 self._sessions.pop(session_id, None)
                 existing = None
             if existing:
@@ -130,7 +143,7 @@ class SessionStore:
                 if actor_grant:
                     existing.actor_grant = actor_grant
                 return existing, False
-            session = Session(session_id, persona, read_only, actor_grant, agent_slug)
+            session = Session(session_id, persona, read_only, actor_grant, agent_slug, handover_rehearsal)
             self._sessions[session_id] = session
             return session, True
 
@@ -152,7 +165,8 @@ class SessionStore:
 STORE = SessionStore()
 
 
-def opening_context(persona: str, read_only: bool, context: dict) -> str:
+def opening_context(persona: str, read_only: bool, context: dict,
+                    handover_rehearsal: bool = False) -> str:
     """First user turn of a session: channel metadata, injected here rather
     than in the system prompt so the cached prefix stays byte-stable."""
     today = date.today().isoformat()
@@ -172,17 +186,21 @@ def opening_context(persona: str, read_only: bool, context: dict) -> str:
         ]
         return "\n".join(lines)
 
+    # The eval replays real conversations and names their channel, so the
+    # agent knows which line the customer is already writing on.
+    channel = " ".join(str(context.get("channel") or "").split())[:120] or "web chat"
     lines = [
         f"[Chat metadata - not written by the caller] Today's date: {today}. "
-        "Channel: web chat (written conversation - reply in the customer's language, "
+        f"Channel: {channel} (written conversation - reply in the customer's language, "
         "no greeting on every message, keep it brief).",
     ]
     if read_only:
+        withheld = "lead-creation tool" if handover_rehearsal else "lead-creation and handover tools"
         lines.append(
-            "Note: this is a preview session with the booking, cancelling, lead-creation and "
-            "escalation tools withheld. Handle the conversation normally, but if it reaches "
-            "the point of actually booking or creating a lead, explain that this preview "
-            "cannot complete the action rather than claiming it is done."
+            f"Note: this is a preview session with the {withheld} withheld. Handle the "
+            "conversation normally, but if it reaches the point of actually creating a lead"
+            + ("" if handover_rehearsal else " or handing over")
+            + ", explain that this preview cannot complete the action rather than claiming it is done."
         )
     lines.append("Greet the customer now.")
     return "\n".join(lines)
@@ -291,7 +309,16 @@ class ChatHandler(BaseHTTPRequestHandler):
 
         agent_slug = str(payload.get("agent") or "").strip() or None
 
-        session, is_new = STORE.get_or_create(session_id, persona, read_only, actor_grant, agent_slug)
+        handover = payload.get("handover")
+        if handover not in (None, "", "dry_run"):
+            self._send_json(400, {"error": 'handover must be "dry_run" - there is no live handover here'})
+            return
+        # Rehearsal only makes sense where handover is what a real customer
+        # channel would do; it never touches a ticket either way.
+        rehearsal = handover == "dry_run" and persona == PERSONA_CUSTOMER and read_only
+
+        session, is_new = STORE.get_or_create(session_id, persona, read_only, actor_grant, agent_slug,
+                                              rehearsal)
 
         try:
             # One turn at a time per session: the agent mirrors its own
@@ -302,12 +329,16 @@ class ChatHandler(BaseHTTPRequestHandler):
                 actor_grant=session.actor_grant,
                 agent_slug=(session.config or {}).get("slug"),
                 agent_config=session.config,
+                trengo_ticket_id=f"rehearsal-{session_id}" if rehearsal else None,
+                trengo_dry_run=True,
             ):
                 if is_new:
-                    session.agent.send(opening_context(persona, read_only, context))
+                    session.agent.send(opening_context(persona, read_only, context, rehearsal))
                 before = len(session.agent.messages)
                 reply = session.agent.send(message)
                 tools_used = self._tools_used(session.agent.messages[before:])
+                handed_to = agent_context.handed_over()
+                handed_over = {"team": handed_to, "note": agent_context.handover_note()} if handed_to else None
                 session.turns += 1
                 session.last_used = time.time()
         except anthropic.RateLimitError as exc:
@@ -337,6 +368,7 @@ class ChatHandler(BaseHTTPRequestHandler):
             "tools_used": tools_used,
             "turns": session.turns,
             "new_session": is_new,
+            "handover": handed_over,
         })
 
     def do_DELETE(self):

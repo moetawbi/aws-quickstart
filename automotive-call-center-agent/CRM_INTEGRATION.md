@@ -113,6 +113,17 @@ ticket as handed over and never answers it again. There is no booking tool:
 a workshop visit is handed over the same way, with the preferred day and
 time in the note.
 
+The worker also hands over by itself, without a model call, when the
+customer's unanswered messages include a voice note, photo, video or file
+(`trengo.media_kind`: Trengo's `body_type`, or WhatsApp's "Message type
+unknown" notice) - the agent can only read text. Nothing is posted; the
+note says what was sent. Stickers are answered normally.
+
+The chat API can rehearse a handover for the CRM's eval: `"handover":
+"dry_run"` on a read-only customer conversation gives the agent
+escalate_to_human back, run against no real ticket, and the response
+carries `{"team", "note"}`. There is no live handover through the chat API.
+
 ### Acceptance (Part A)
 
 From the agent install (or any machine with this repo + Python):

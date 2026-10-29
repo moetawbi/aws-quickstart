@@ -13,8 +13,8 @@ methods below so adjustments are one-line changes):
 - ``POST /tickets/{ticket_id}/messages`` post a reply, body ``{"message": ...}``
 
 Response field names vary a little across Trengo channel types, so the
-message parsing helpers (`message_text`, `is_inbound`, `is_internal_note`)
-probe the common shapes instead of assuming one. Failures are returned as
+message parsing helpers (`message_text`, `media_kind`, `is_inbound`,
+`is_internal_note`) probe the common shapes instead of assuming one. Failures are returned as
 ``{"error": ...}`` dicts, never raised, matching the CRM client.
 
 Nothing is ever posted to a customer unless ``TRENGO_REPLIES_ENABLED=1``:
@@ -137,6 +137,41 @@ def message_text(message: dict) -> str:
         value = message.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
+    return ""
+
+
+# WhatsApp media reaches the API as a placeholder word in `message` ("Audio",
+# "Image", ...), with the kind in `body_type` and the file under `file_url`.
+# Stickers arrive as IMAGE too; they are a reaction, not a request.
+MEDIA_KINDS = {
+    "AUDIO": "voice note",
+    "IMAGE": "image",
+    "VIDEO": "video",
+    "DOCUMENT": "document",
+    "FILE": "file",
+    "LOCATION": "location",
+}
+_PLACEHOLDERS = {"audio": "voice note", "image": "image", "video": "video", "document": "document"}
+# WhatsApp error 131051: Trengo received the message but not its content.
+UNREADABLE_MARKER = "Message type unknown"
+
+
+def media_kind(message: dict) -> str:
+    """What the customer sent that the agent cannot open - "voice note",
+    "image", ... - or "" for text (and for a sticker)."""
+    text = message_text(message)
+    if text.lower() == "sticker":
+        return ""
+    if UNREADABLE_MARKER in text:
+        return "unreadable message"
+    body_type = str(message.get("body_type") or "").upper()
+    if body_type and body_type != "TEXT":
+        return MEDIA_KINDS.get(body_type, body_type.lower())
+    if not body_type:
+        # Payloads without body_type: fall back to the file and the placeholder.
+        if message.get("file_url"):
+            return _PLACEHOLDERS.get(text.lower(), "attachment")
+        return _PLACEHOLDERS.get(text.lower(), "")
     return ""
 
 
