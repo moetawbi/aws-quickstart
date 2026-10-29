@@ -225,18 +225,24 @@ def _turn_text(assistant_messages: list[dict]) -> str:
     often says something next to a tool call ("Nahr El Mot is closed on
     Saturdays") and then refers back to it ("as mentioned") afterwards.
 
-    One exception: when the model writes its closing message together with
-    the escalate_to_human call, whatever it adds after the handover is a
-    repeat ("Handed over - a colleague will take it from here"), so drop it.
+    One exception: after escalate_to_human, the first text the model writes
+    (with the call or right after it) is the closing message; anything it
+    writes later - typically after saving a memory note - is narration such
+    as "The handover is done - a colleague will take it from here", so drop it.
     """
     texts: list[str] = []
+    handed_over = False
     for message in assistant_messages:
         blocks = message["content"]
-        texts += [b.text.strip() for b in blocks if getattr(b, "type", None) == "text" and b.text.strip()]
-        handed_over_here = any(getattr(b, "type", None) == "tool_use" and getattr(b, "name", None) == "escalate_to_human"
-                               for b in blocks)
-        if handed_over_here and any(getattr(b, "type", None) == "text" and b.text.strip() for b in blocks):
+        said = [b.text.strip() for b in blocks if getattr(b, "type", None) == "text" and b.text.strip()]
+        texts += said
+        if handed_over and said:
             break
+        if any(getattr(b, "type", None) == "tool_use" and getattr(b, "name", None) == "escalate_to_human"
+               for b in blocks):
+            handed_over = True
+            if said:
+                break
     return "\n\n".join(texts)
 
 
