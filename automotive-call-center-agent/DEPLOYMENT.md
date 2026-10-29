@@ -198,3 +198,33 @@ Knowledge/Manuals/Memory pages, no customer ever reaching it — install only
 and the reverse-proxy step, and leave `TRENGO_REPLIES_ENABLED` and
 `TRENGO_API_KEY` unset. Both services bind to `127.0.0.1`, so nothing is
 reachable from outside the server.
+
+## Assist drafts, rung by the CRM (Phase 3 deployments)
+
+When the CRM already receives Trengo's webhooks (anb-used-vehicles does), it
+rings the agent itself for inboxes it is deployed to, so the webhook server
+never faces the internet and no Trengo webhook points here:
+
+`/etc/systemd/system/cc-agent-trengo.service` — the `cc-agent-chat` unit with
+
+```ini
+Description=Call center agent - Trengo doorbell from the CRM (127.0.0.1 only)
+ExecCondition=/bin/sh -c 'test -n "$${ANTHROPIC_API_KEY}" && test -n "$${TRENGO_API_KEY}"'
+ExecStart=/home/<user>/call-center-agent/automotive-call-center-agent/.venv/bin/python trengo_webhook.py
+```
+
+and in the agent's `.env`:
+
+```
+TRENGO_API_KEY=...                 # a dedicated Trengo user's token: drafts appear under its name
+TRENGO_NOTES_ENABLED=1             # Assist: internal notes only
+TRENGO_WEBHOOK_BIND=127.0.0.1
+TRENGO_WEBHOOK_SECRET=...          # = the CRM's CALL_CENTER_AGENT_RELAY_TOKEN
+TRENGO_STATE_FILE=/home/<user>/call-center-agent-data/trengo_state.json
+# TRENGO_REPLIES_ENABLED stays unset until an inbox goes AutoPilot
+```
+
+The CRM side is `CALL_CENTER_AGENT_RELAY_ENABLED=true` plus the token. Which
+inboxes the agent works, and in which mode, is set in the CRM (Agents →
+Deployments); the worker reads it from `GET /api/agent/deployments` and leaves
+every other inbox alone.

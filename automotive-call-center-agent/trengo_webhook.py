@@ -35,6 +35,11 @@ Design notes:
 The polling worker (``trengo_worker.py``) shares the same state file, so
 you can run webhooks as primary and an occasional ``--once`` poll from
 cron as a safety net without double replies.
+
+When a CRM already receives Trengo's webhooks (anb-used-vehicles does), it
+rings this server instead, with ``{"ticket_id": ...}`` and the token, for
+inboxes an agent is deployed to: set TRENGO_WEBHOOK_BIND=127.0.0.1 and no
+Trengo webhook points here at all.
 """
 
 from __future__ import annotations
@@ -54,6 +59,9 @@ from trengo_worker import TrengoWorker
 
 WEBHOOK_PATH = os.environ.get("TRENGO_WEBHOOK_PATH", "/webhooks/trengo")
 PORT = int(os.environ.get("TRENGO_WEBHOOK_PORT", "8080"))
+# 127.0.0.1 when the CRM relays Trengo's webhooks (it already receives them);
+# 0.0.0.0 only when Trengo calls this server directly.
+BIND = os.environ.get("TRENGO_WEBHOOK_BIND", "0.0.0.0")
 MAX_BODY_BYTES = 1_000_000
 
 
@@ -204,8 +212,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    if not trengo.replies_enabled():
-        print(trengo.REPLIES_DISABLED, file=sys.stderr)
+    if not (trengo.replies_enabled() or trengo.notes_enabled()):
+        print(f"{trengo.REPLIES_DISABLED} {trengo.NOTES_DISABLED}", file=sys.stderr)
         raise SystemExit(1)
     if not os.environ.get("TRENGO_API_KEY"):
         print("TRENGO_API_KEY is not set.", file=sys.stderr)
@@ -215,8 +223,8 @@ def main() -> None:
         print("TRENGO_WEBHOOK_SECRET is not set. Set it (recommended) or set "
               "TRENGO_WEBHOOK_ALLOW_INSECURE=1 for local development.", file=sys.stderr)
         raise SystemExit(1)
-    server = WebhookServer(("0.0.0.0", PORT), TrengoWorker(), secret)
-    _log(f"listening on :{PORT}{WEBHOOK_PATH} " + ("(token required)" if secret else "(INSECURE: no token)"))
+    server = WebhookServer((BIND, PORT), TrengoWorker(), secret)
+    _log(f"listening on {BIND}:{PORT}{WEBHOOK_PATH} " + ("(token required)" if secret else "(INSECURE: no token)"))
     server.serve_forever()
 
 

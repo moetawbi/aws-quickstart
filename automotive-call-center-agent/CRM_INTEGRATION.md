@@ -103,6 +103,18 @@ own records only - never from IMAD's data.
 "Staff" is a conversation carrying an actor grant whose CRM user has
 `view service cases`.
 
+### A8. `GET {base}/deployments` (Phase 3)
+
+Which agent works which Trengo inbox, and how:
+`{"data": [{"channel_id": "1333697", "channel_name": "...", "channel_type": "WA_BUSINESS", "agent": "call-center", "mode": "assist"}]}`.
+`mode` is `assist` (draft the reply as an internal note for an advisor) or
+`autopilot` (answer the customer); the CRM already reports `assist` unless its
+server allows AutoPilot. `deployments.py` caches it for a minute;
+`trengo_worker.py` leaves any inbox not listed - and every inbox while the CRM
+is unreachable - to the team, and runs AutoPilot as Assist unless
+`TRENGO_REPLIES_ENABLED=1`. The CRM rings `trengo_webhook.py` (bound to
+127.0.0.1) with `{"ticket_id"}` for deployed inboxes; see DEPLOYMENT.md.
+
 ### Handover (not a CRM endpoint)
 
 `escalate_to_human` re-assigns the Trengo ticket being answered to the

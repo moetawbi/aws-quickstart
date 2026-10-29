@@ -18,8 +18,10 @@ message parsing helpers (`message_text`, `media_kind`, `is_inbound`,
 ``{"error": ...}`` dicts, never raised, matching the CRM client.
 
 Nothing is ever posted to a customer unless ``TRENGO_REPLIES_ENABLED=1``:
-``send_message`` is the only write and it refuses without it, so reading
-tickets for testing can never turn into answering them by accident.
+``send_message`` and ``assign_ticket`` refuse without it, so reading tickets
+for testing can never turn into answering them by accident. Internal notes -
+Assist mode's drafts, which customers never see - have their own switch,
+``TRENGO_NOTES_ENABLED=1``.
 """
 
 from __future__ import annotations
@@ -31,12 +33,18 @@ import requests
 DEFAULT_BASE_URL = "https://app.trengo.com/api/v2"
 DEFAULT_TIMEOUT = float(os.environ.get("TRENGO_TIMEOUT_SECONDS", "15"))
 REPLIES_DISABLED = "Trengo replies are disabled (set TRENGO_REPLIES_ENABLED=1 to let the agent answer customers)."
+NOTES_DISABLED = "Trengo internal notes are disabled (set TRENGO_NOTES_ENABLED=1 for Assist drafts)."
 
 
 def replies_enabled() -> bool:
     """The kill switch for every customer-visible Trengo message. Read per
     call, so flipping the env var and restarting is the whole change."""
     return os.environ.get("TRENGO_REPLIES_ENABLED", "").strip() == "1"
+
+
+def notes_enabled() -> bool:
+    """The switch for internal notes - drafts only the team sees."""
+    return os.environ.get("TRENGO_NOTES_ENABLED", "").strip() == "1"
 
 
 class TrengoClient:
@@ -126,6 +134,15 @@ class TrengoClient:
         payload = self._request("POST", f"/tickets/{ticket_id}/messages", json={"message": text})
         return payload if isinstance(payload, dict) else {"sent": True}
 
+    def add_note(self, ticket_id, text: str) -> dict:
+        """An internal note on the ticket: visible to the team, never sent to
+        the customer. Assist mode's drafts go here."""
+        if not notes_enabled():
+            return {"error": NOTES_DISABLED}
+        payload = self._request("POST", f"/tickets/{ticket_id}/messages",
+                                json={"message": text, "internal_note": True})
+        return payload if isinstance(payload, dict) else {"noted": True}
+
 
 # ---------------------------------------------------------------------------
 # Message shape helpers - Trengo field names differ across channel types,
@@ -176,7 +193,10 @@ def media_kind(message: dict) -> str:
 
 
 def is_internal_note(message: dict) -> bool:
-    return bool(message.get("is_note") or message.get("internal") or message.get("note"))
+    # The API marks notes with type "NOTE" - the agent's own Assist drafts
+    # among them, which must never read back as replies the team sent.
+    return bool(message.get("is_note") or message.get("internal") or message.get("note")
+                or str(message.get("type", "")).upper() == "NOTE")
 
 
 def is_inbound(message: dict) -> bool:
@@ -207,6 +227,7 @@ def ticket_summary(ticket: dict) -> dict:
     channel = ticket.get("channel") or {}
     return {
         "ticket_id": ticket.get("id"),
+        "channel_id": str(channel.get("id") or ticket.get("channel_id") or ""),
         "status": ticket.get("status", ""),
         "subject": ticket.get("subject") or "",
         "contact_name": contact.get("full_name") or contact.get("name") or "",
