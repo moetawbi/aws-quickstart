@@ -113,6 +113,13 @@ ticket as handed over and never answers it again. There is no booking tool:
 a workshop visit is handed over the same way, with the preferred day and
 time in the note.
 
+The customer gets one closing message with the handover: anything the note
+says they were told (e.g. "Nahr El Mot is closed on Saturdays, Chtaura is
+open 8-1") plus "a colleague will continue here". `CallCenterAgent.send()`
+returns every text block of a turn - text written beside a tool call
+reaches the customer too - except that after a handover only the first
+text is kept (later text is the model narrating the handover).
+
 The worker also hands over by itself, without a model call, when the
 customer's unanswered messages include a voice note, photo, video or file
 (`trengo.media_kind`: Trengo's `body_type`, or WhatsApp's "Message type
