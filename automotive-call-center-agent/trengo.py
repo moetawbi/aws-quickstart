@@ -110,11 +110,15 @@ class TrengoClient:
         return {"error": "Unexpected Trengo response."}
 
     def get_messages(self, ticket_id) -> list[dict] | dict:
+        """The ticket's latest messages (Trengo's first page), OLDEST FIRST.
+        Trengo returns them newest first; every caller here reads the end of
+        the list as the latest message, so they are put in time order."""
         payload = self._request("GET", f"/tickets/{ticket_id}/messages")
         data = self._data(payload)
         if data is None:
             return payload if isinstance(payload, dict) else {"error": "Unexpected Trengo response."}
-        return [m for m in data if isinstance(m, dict)]
+        return sorted((m for m in data if isinstance(m, dict)),
+                      key=lambda m: (str(m.get("created_at") or ""), int(m.get("id") or 0)))
 
     def assign_ticket(self, ticket_id, team_id: int, note: str = "") -> dict:
         """Re-assign a ticket to a team - the agent's handover. The customer
