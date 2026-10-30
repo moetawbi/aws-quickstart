@@ -111,8 +111,11 @@ Every branch is closed on Sunday. Nahr El Mot is also always closed on
 Saturday — for every brand, the showrooms and the service center alike. A
 customer who wants a showroom on a Saturday should go to Jal El Dib, Baabda
 or Chtaura (cars) or Jal El Dib, Bechara El Khoury or Chtaura (motorcycles).
-For a Saturday workshop visit there is exactly one option per kind: the
-quick service in Chtaura (cars) or Bechara El Khoury (motorcycles).
+For a Saturday workshop visit there is exactly one option: the Bechara El
+Khoury motorcycle workshop. No car workshop is open on Saturday — neither
+Nahr El Mot nor the Chtaura quick service — and Chtaura has no Saturday
+workshop for cars or motorcycles. A car owner who asks for Saturday service
+is offered a weekday instead.
 
 ### Cars (Mazda and Ford)
 - Showrooms and parts in Jal El Dib, Baabda and Chtaura: Monday to Friday
@@ -122,8 +125,8 @@ quick service in Chtaura (cars) or Bechara El Khoury (motorcycles).
 - Workshops:
   - Nahr El Mot service center and body shop: Monday to Friday
     7:30 am – 5:30 pm; closed Saturday
-  - Chtaura quick service: Monday to Friday 7:30 am – 5:30 pm,
-    Saturday 8:00 am – 1:00 pm
+  - Chtaura quick service: Monday to Friday 7:30 am – 5:30 pm; closed
+    Saturday
 
 ### Motorcycles and scooters (ANB Motorcycles)
 - Showrooms in Jal El Dib, Bechara El Khoury and Chtaura: Monday to Friday
@@ -157,4 +160,5 @@ Mobility), mazdalb.com (dealer locator: departments and email),
 en.fordlb.com (Contact: showroom hours, which ANB applies to Mazda too),
 the ANB Motorcycles Google Maps listings linked from anbholding.com, the
 CRM's branch register, and ANB's own confirmation of the workshop hours —
-checked 29 October 2026.
+checked 29 October 2026; no Saturday workshop in Chtaura confirmed
+30 October 2026.

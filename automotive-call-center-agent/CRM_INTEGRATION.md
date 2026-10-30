@@ -126,8 +126,8 @@ a workshop visit is handed over the same way, with the preferred day and
 time in the note.
 
 The customer gets one closing message with the handover: anything the note
-says they were told (e.g. "Nahr El Mot is closed on Saturdays, Chtaura is
-open 8-1") plus "a colleague will continue here". `CallCenterAgent.send()`
+says they were told (e.g. "our car workshops are closed on Saturdays, so
+Monday at 8:00") plus "a colleague will continue here". `CallCenterAgent.send()`
 returns every text block of a turn - text written beside a tool call
 reaches the customer too - except that after a handover only the first
 text is kept (later text is the model narrating the handover).
