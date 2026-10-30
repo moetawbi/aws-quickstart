@@ -237,3 +237,13 @@ label in Trengo: the CRM rings with `{"ticket_id", "force": true, "label"}`, the
 worker drafts the customer's latest messages whoever owns the ticket (team
 replies since go in as context) and then removes the label - which needs the
 API token's user to be allowed to edit labels.
+
+The CRM also rings when a ticket is assigned (Trengo's `TICKET_ASSIGNED`
+webhook, pointed at the CRM): once a team or person owns a ticket, the
+chatbot's automatic replies no longer count as answers, so the hand-over gets
+a draft for the whole booking or survey conversation. Closed tickets are only
+drafted on request. The CRM records every draft and what the advisor sent
+(Agents -> Drafts); keep both note headers starting `🤖 AI draft (Assist`.
+
+`python trengo_worker_checks.py` runs the worker's decisions offline (fake
+Trengo, stub agent) - run it after any change to the worker.

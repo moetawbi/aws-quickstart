@@ -233,6 +233,17 @@ def is_inbound(message: dict) -> bool:
     return has_contact and not has_agent
 
 
+def is_automated(message: dict) -> bool:
+    """An outbound message nobody typed - Trengo's chatbot and auto-replies.
+    (Messages sent through the API, like the CRM's templates, carry the
+    token's user and count as ours.)"""
+    if is_inbound(message) or is_internal_note(message):
+        return False
+    if message.get("is_auto_reply"):
+        return True
+    return not (message.get("agent") or message.get("agent_id") or message.get("user") or message.get("user_id"))
+
+
 def ticket_summary(ticket: dict) -> dict:
     """The bits of a Trengo ticket the worker cares about."""
     contact = ticket.get("contact") or {}
