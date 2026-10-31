@@ -341,7 +341,11 @@ class TrengoWorker:
                 trengo_ticket_id=ticket_id,
                 trengo_dry_run=True,  # a rehearsal: the ticket is never re-assigned
             ):
+                started = time.monotonic()
                 draft = agent.send(user_turn)
+                model_seconds = time.monotonic() - started
+                # One assistant message per API call (tool round-trips included).
+                model_calls = sum(1 for m in getattr(agent, "messages", []) if isinstance(m, dict) and m.get("role") == "assistant")
                 handed_to = agent_context.handed_over()
                 handover_note = agent_context.handover_note()
         except Exception as exc:
@@ -366,7 +370,7 @@ class TrengoWorker:
         if draft_label:
             self._clear_label(ticket_id, summary, draft_label)
         _log(f"ticket {ticket_id}: drafted ({len(note)} chars{', handover suggested' if handed_to else ''}"
-             f"{', on request' if draft_label else ''})")
+             f"{', on request' if draft_label else ''}; model {model_seconds:.1f}s over {model_calls} call(s))")
         return "drafted"
 
     def _clear_label(self, ticket_id: str, summary: dict, label: str) -> None:

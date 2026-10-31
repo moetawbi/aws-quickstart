@@ -285,7 +285,8 @@ class RecordingWorker:
 
 
 q = trengo_webhook.TicketQueue.__new__(trengo_webhook.TicketQueue)
-q.worker, q._pending, q._active, q._lock, q._queue = RecordingWorker(), {}, 0, threading.Lock(), queue.Queue()
+q.worker, q._pending, q._submitted_at, q._active = RecordingWorker(), {}, {}, 0
+q._lock, q._queue = threading.Lock(), queue.Queue()
 q.submit("88")
 q.submit("88", draft_label="AI Draft")
 check("queue: a label upgrades a pending routine ring", q._pending == {"88": "AI Draft"} and q._queue.qsize() == 1)

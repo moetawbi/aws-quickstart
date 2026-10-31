@@ -111,6 +111,7 @@ class TicketQueue:
         self.worker = worker
         self._queue: queue.Queue[str] = queue.Queue()
         self._pending: dict[str, str] = {}  # ticket id -> draft label an advisor added ("" = routine)
+        self._submitted_at: dict[str, float] = {}  # ticket id -> when it was rung, for the timing log
         self._active = 0
         self._lock = threading.Lock()
         threading.Thread(target=self._consume, daemon=True).start()
@@ -123,6 +124,7 @@ class TicketQueue:
                 self._pending[ticket_id] = self._pending[ticket_id] or draft_label
                 return False
             self._pending[ticket_id] = draft_label
+            self._submitted_at[ticket_id] = time.monotonic()
         self._queue.put(ticket_id)
         return True
 
@@ -133,10 +135,14 @@ class TicketQueue:
             # process this ticket re-queues it, so its message isn't missed.
             with self._lock:
                 draft_label = self._pending.pop(ticket_id, "")
+                rung_at = self._submitted_at.pop(ticket_id, None)
                 self._active += 1
+            started = time.monotonic()
             try:
                 outcome = self.worker.handle_ticket_id(ticket_id, draft_label=draft_label)
-                _log(f"ticket {ticket_id}: {outcome}")
+                # waited: behind other tickets here; took: reading Trengo, the model, posting.
+                waited = f"waited {started - rung_at:.1f}s, " if rung_at is not None else ""
+                _log(f"ticket {ticket_id}: {outcome} ({waited}took {time.monotonic() - started:.1f}s)")
             except Exception as exc:  # one bad ticket must not kill the consumer
                 _log(f"ticket {ticket_id}: crashed ({exc.__class__.__name__}: {exc})")
             finally:
