@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.trengo_state.json
+memory/
+.env
+.venv/
+catalogues/
