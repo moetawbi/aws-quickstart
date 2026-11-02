@@ -49,9 +49,11 @@ a mix of the two inside one word.
   Lebanon): Vespa, Aprilia, Moto Guzzi, Bajaj, KTM and Husqvarna — sales,
   maintenance and accessories.
 - Electric bicycles: Stromer and KTM.
-- Car rental, from the Mazda Lebanon showrooms in Jal El Dib and Nahr El Mot.
-- Used cars and motorcycles; Wheelers.me is ANB's online platform for car
-  and motorcycle shopping and for booking a rental car.
+- Car rental, from the Mazda Lebanon showrooms in Jal El Dib and Nahr El Mot;
+  a rental car can also be booked on Wheelers.me.
+- Used cars and motorcycles, sold by ANB's used-vehicle team. Every used
+  enquiry is followed up by that team as a lead: never send a customer to a
+  website (Wheelers.me included) for used vehicles.
 - Motor insurance through ANB's broker, Shield Insurance Brokerage S.A.L.
   (El Metn, Jeideh, Nahr El Mot, Metn Express Highway).
 
@@ -161,4 +163,5 @@ en.fordlb.com (Contact: showroom hours, which ANB applies to Mazda too),
 the ANB Motorcycles Google Maps listings linked from anbholding.com, the
 CRM's branch register, and ANB's own confirmation of the workshop hours —
 checked 29 October 2026; no Saturday workshop in Chtaura confirmed
-30 October 2026.
+30 October 2026; used vehicles never referred to Wheelers.me (ANB, 2 November
+2026).
