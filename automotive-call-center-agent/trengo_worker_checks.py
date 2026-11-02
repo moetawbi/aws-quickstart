@@ -154,7 +154,7 @@ class DraftingAgent(StubAgent):
         return "Our Jal El Dib showroom is open Saturday 8:00-1:00."
 
 
-def drafting_worker(messages, routing, dry_run=False):
+def drafting_worker(messages, routing, dry_run=False, deliver=None):
     os.environ["TRENGO_NOTES_ENABLED"] = "1"
     os.environ.pop("TRENGO_REPLIES_ENABLED", None)
     made = []
@@ -165,7 +165,7 @@ def drafting_worker(messages, routing, dry_run=False):
 
     state = state_file()
     return trengo_worker.TrengoWorker(client=FakeClient(messages), agent_factory=factory, state_path=state,
-                                      dry_run=dry_run, routing=routing), made, state
+                                      dry_run=dry_run, routing=routing, deliver=deliver), made, state
 
 
 def assist_routing(channel_id):
@@ -311,6 +311,62 @@ check("once a person replied, earlier drafts are history, not pending", "Your ea
 w, made, _ = drafting_worker([msg(1, "Salam"), draft_note, msg(3, "Parts please")], assist_routing)
 w.handle_ticket(owned, draft_label="AI Draft")
 check("a label request gets a complete draft, not an add-on", "Your earlier draft(s)" not in made[-1][2].turns[0])
+
+# -- sidebar delivery: one living suggestion, sent to the CRM ------------------------------------
+def sidebar_routing(channel_id):
+    return {"agent": "call-center", "mode": "assist", "delivery": "sidebar"}
+
+
+delivered: list[dict] = []
+
+
+def crm_takes(draft):
+    delivered.append(draft)
+    return True
+
+
+w, made, _ = drafting_worker([msg(1, "Hello"), msg(2, "Hi, how can I help?", inbound=False), msg(3, "Open Saturday?")],
+                             sidebar_routing, deliver=crm_takes)
+check("sidebar: drafted to the CRM, no note on the ticket",
+      w.handle_ticket(owned) == "drafted" and not w.client.notes and len(delivered) == 1)
+sent = delivered[-1]
+check("sidebar: the draft carries the ticket, inbox, agent, reply, the lines it answers and an id",
+      sent["ticket_id"] == "77" and sent["channel_id"] == "1333697" and sent["agent"] == "call-center"
+      and sent["draft"] == "Our Jal El Dib showroom is open Saturday 8:00-1:00." and sent["customer_message"] == "Open Saturday?"
+      and len(sent["draft_id"]) == 24 and sent["on_request"] is False and sent["handover_team"] is None)
+check("sidebar: the same message is never drafted twice", w.handle_ticket(owned) == "skipped" and len(delivered) == 1)
+
+delivered.clear()
+w, made, _ = drafting_worker([msg(1, "Salam"), msg(2, "I need parts for my Vespa")], sidebar_routing, deliver=crm_takes)
+w.replied["77"] = 1  # "Salam" was drafted already, never sent
+w.handle_ticket(owned)
+turn = made[-1][2].turns[0]
+check("sidebar follow-up: a complete draft over everything since the team wrote, no add-on instructions",
+      "New message from the customer:\nSalam\nI need parts for my Vespa" in turn and "Your earlier draft(s)" not in turn
+      and delivered[-1]["customer_message"] == "Salam\nI need parts for my Vespa")
+
+delivered.clear()
+w, made, _ = drafting_worker([msg(1, "Can someone check my recall?")], sidebar_routing, deliver=crm_takes)
+w.handle_ticket(owned)
+check("sidebar: a would-be handover travels as team + reason",
+      delivered[-1]["handover_team"] == "ANB Call Center"
+      and delivered[-1]["handover_reason"] == "High priority. Customer wants a recall check.")
+
+w, made, _ = drafting_worker([msg(1, "Open Saturday?")], sidebar_routing, deliver=lambda draft: False)
+check("sidebar: the CRM not taking it -> posted as a note, so the advisor still gets it",
+      w.handle_ticket(owned) == "drafted" and len(w.client.notes) == 1
+      and w.client.notes[0][1].startswith("🤖 AI draft (Assist) - review"))
+
+delivered.clear()
+w, made, _ = drafting_worker([msg(1, "Open Saturday?"), msg(2, "Yes, 8 to 1.", inbound=False)],
+                             sidebar_routing, deliver=crm_takes)
+check("sidebar: a label request goes to the sidebar, marked on request",
+      w.handle_ticket(unowned, draft_label="AI Draft") == "drafted" and delivered[-1]["on_request"] is True
+      and not w.client.notes and w.client.removed == [("77", 9001)])
+
+delivered.clear()
+w, made, _ = drafting_worker([msg(1, "Open Saturday?")], sidebar_routing, dry_run=True, deliver=crm_takes)
+check("sidebar dry run: nothing delivered", w.handle_ticket(owned) == "drafted" and not delivered)
 
 # -- the webhook queue ---------------------------------------------------------------------------
 class RecordingWorker:

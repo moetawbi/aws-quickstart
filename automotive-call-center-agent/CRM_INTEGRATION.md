@@ -106,14 +106,27 @@ own records only - never from IMAD's data.
 ### A8. `GET {base}/deployments` (Phase 3)
 
 Which agent works which Trengo inbox, and how:
-`{"data": [{"channel_id": "1333697", "channel_name": "...", "channel_type": "WA_BUSINESS", "agent": "call-center", "mode": "assist"}]}`.
-`mode` is `assist` (draft the reply as an internal note for an advisor) or
-`autopilot` (answer the customer); the CRM already reports `assist` unless its
-server allows AutoPilot. `deployments.py` caches it for a minute;
+`{"data": [{"channel_id": "1333697", "channel_name": "...", "channel_type": "WA_BUSINESS", "agent": "call-center", "mode": "assist", "work_when": "owned", "delivery": "sidebar"}]}`.
+`mode` is `assist` (draft the reply for an advisor) or `autopilot` (answer the
+customer); the CRM already reports `assist` unless its server allows
+AutoPilot. `delivery` is where an Assist draft goes: `note` (an internal note
+on the ticket) or `sidebar` (A9 - shown in the CRM's Trengo sidebar app). `deployments.py` caches it for a minute;
 `trengo_worker.py` leaves any inbox not listed - and every inbox while the CRM
 is unreachable - to the team, and runs AutoPilot as Assist unless
 `TRENGO_REPLIES_ENABLED=1`. The CRM rings `trengo_webhook.py` (bound to
 127.0.0.1) with `{"ticket_id"}` for deployed inboxes; see DEPLOYMENT.md.
+
+### A9. `POST {base}/drafts` (sidebar delivery)
+
+For an inbox whose deployment says `delivery: sidebar`, the worker sends its
+Assist draft here instead of posting a note:
+`{"draft_id", "ticket_id", "channel_id", "agent", "draft", "customer_message",
+"handover_team", "handover_reason", "on_request"}` -> `201` (`200` for a
+`draft_id` already recorded, so a retry is harmless). The CRM records it with
+the note drafts, scores the advisor's reply against it and shows it in
+Trengo's sidebar app, where each new draft replaces the last - so a sidebar
+draft answers everything the customer wrote since the team last replied. Any
+failure and the worker posts the draft as a note instead.
 
 ### Handover (not a CRM endpoint)
 

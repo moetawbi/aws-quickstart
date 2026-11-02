@@ -238,6 +238,13 @@ worker drafts the customer's latest messages whoever owns the ticket (team
 replies since go in as context) and then removes the label - which needs the
 API token's user to be allowed to edit labels.
 
+And **where** its drafts go: `note` posts each one as an internal note;
+`sidebar` sends it to the CRM (`POST /api/agent/drafts`), which shows one
+living suggestion per ticket in its "AI draft" app in Trengo's right sidebar
+(a Trengo custom app pointing at `https://<crm>/trengo/sidebar`, its auth
+token in the CRM's `CALL_CENTER_AGENT_SIDEBAR_TOKEN`). Nothing to configure
+here: if the CRM doesn't take a draft, the worker posts it as a note.
+
 The CRM also rings when a ticket is assigned (Trengo's `TICKET_ASSIGNED`
 webhook, pointed at the CRM): once a team or person owns a ticket, the
 chatbot's automatic replies no longer count as answers, so the hand-over gets

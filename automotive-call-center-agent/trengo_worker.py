@@ -25,11 +25,15 @@ deployments (deployments.py): an inbox with no deployment is left to the
 team. Without a CRM there are no deployments and the built-in default agent
 answers every ticket, as the template always did.
 
-- **Assist** drafts the reply as an internal note for an advisor to review
-  and send - nothing reaches the customer, nothing is handed over, nothing is
-  written to the CRM. Each draft starts a fresh read-only agent fed the whole
-  ticket, so it sees what the advisors actually sent. Needs
-  TRENGO_NOTES_ENABLED=1.
+- **Assist** drafts the reply for an advisor to review and send - nothing
+  reaches the customer, nothing is handed over. Each draft starts a fresh
+  read-only agent fed the whole ticket, so it sees what the advisors actually
+  sent. The deployment's **delivery** decides where the draft goes: an
+  internal note on the ticket (``note``), or the CRM, which shows it in
+  Trengo's sidebar app (``sidebar``) - one living suggestion per ticket, each
+  draft answering everything since the team last wrote and replacing the
+  last, since Trengo notes can't be edited or removed. A draft the CRM does
+  not take is posted as a note instead. Needs TRENGO_NOTES_ENABLED=1.
 - A deployment's **work_when** is ``owned`` (default: only tickets a team or
   a person owns - Trengo's chatbot runs its flows on unowned ones) or
   ``always``. An advisor's draft label ("AI Draft", relayed by the CRM as a
@@ -63,6 +67,7 @@ import json
 import os
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -85,6 +90,9 @@ MODE_AUTOPILOT = "autopilot"
 # "always" works every customer message.
 WORK_WHEN_OWNED = "owned"
 WORK_WHEN_ALWAYS = "always"
+# Where an Assist draft goes: an internal note, or the CRM's Trengo sidebar app.
+DELIVERY_NOTE = "note"
+DELIVERY_SIDEBAR = "sidebar"
 ASSIST_HEADER = "🤖 AI draft (Assist) - review before sending"
 # A draft an advisor asked for with the draft label. The CRM reads both
 # headers to measure how drafts are used - keep the "🤖 AI draft (Assist" start.
@@ -126,7 +134,7 @@ def _log(text: str) -> None:
 class TrengoWorker:
     def __init__(self, client: trengo.TrengoClient | None = None,
                  agent_factory=agent_for, state_path: Path | None = None,
-                 dry_run: bool = False, routing=None):
+                 dry_run: bool = False, routing=None, deliver=None):
         self.client = client or trengo.TrengoClient()
         # agent_for(slug) loads that CRM agent (the default when slug is None),
         # falling back to the built-in prompts when the CRM cannot be reached.
@@ -134,6 +142,8 @@ class TrengoWorker:
         # channel id -> deployment, or None; no CRM means no deployments.
         self.routing = routing if routing is not None else (
             deployments.for_channel if agent_config.available() else None)
+        # Sends a sidebar draft to the CRM; False when it did not arrive.
+        self.deliver = deliver or deployments.deliver_draft
         self.dry_run = dry_run  # never post replies, assign tickets or update state; log instead
         self.state_path = state_path or default_state_path()
         self.agents: dict[str, CallCenterAgent] = {}  # live sessions, keyed by ticket id
@@ -205,16 +215,18 @@ class TrengoWorker:
                     lines.append(f"{who}: {text}")
         return "\n".join(lines)
 
-    def _unanswered(self, ticket_id: str, visible: list[dict], past_automated: bool = False) -> list[dict]:
+    def _unanswered(self, ticket_id: str, visible: list[dict], past_automated: bool = False,
+                    whole_run: bool = False) -> list[dict]:
         """The customer's messages since our last one that the agent has not
-        answered yet, oldest first.
+        answered yet, oldest first. With `whole_run`, the ones it drafted
+        before count too: everything since the team last wrote.
 
         With `past_automated` (the ticket is owned - the chatbot is done) the
         chatbot's automatic replies do not count as answers: its closing "a
         colleague will contact you" leaves the customer's request open, so
         the run reaches back to the last message a person (or the API) sent,
         chatbot lines included as context."""
-        answered = self.replied.get(ticket_id, -1)
+        answered = -1 if whole_run else self.replied.get(ticket_id, -1)
         run: list[dict] = []
         for message in reversed(visible):
             message_id = int(message.get("id") or 0)
@@ -340,6 +352,7 @@ class TrengoWorker:
         it can be used again."""
         visible = [m for m in messages if not trengo.is_internal_note(m)]
         past_automated = bool(summary.get("owned"))
+        sidebar = deployment.get("delivery") == DELIVERY_SIDEBAR
         unanswered = (self._last_customer_run(visible, past_automated) if draft_label
                       else self._unanswered(ticket_id, visible, past_automated))
         customer = [m for m in unanswered if trengo.is_inbound(m)]
@@ -356,6 +369,11 @@ class TrengoWorker:
             return "deferred"
 
         kinds = list(dict.fromkeys(kind for kind in map(trengo.media_kind, customer) if kind))
+        if sidebar and not draft_label:
+            # One living suggestion: it replaces the last one in the sidebar,
+            # so it answers everything since the team last wrote.
+            unanswered = self._unanswered(ticket_id, visible, past_automated, whole_run=True)
+            customer = [m for m in unanswered if trengo.is_inbound(m)]
         if kinds:
             # The advisor has to open it anyway; a draft could only guess.
             self._mark_answered(ticket_id, latest_id)
@@ -392,7 +410,8 @@ class TrengoWorker:
                               + "\nDraft the next reply, building on what the team already said.")
             # Notes cannot be edited or removed in Trengo, so a follow-up draft
             # adds to the one the advisor already has instead of repeating it.
-            earlier = [] if draft_label else self._unsent_drafts(messages)
+            # A sidebar draft replaces the last one instead.
+            earlier = [] if draft_label or sidebar else self._unsent_drafts(messages)
             if earlier:
                 user_turn += ("\n\nYour earlier draft(s) on this ticket, posted as internal notes since we last "
                               "replied - the advisor has them but has not sent anything yet:\n---\n"
@@ -422,20 +441,50 @@ class TrengoWorker:
             return "error"
 
         if self.dry_run:
-            _log(f"ticket {ticket_id}: DRY RUN - would note: {note[:200]}")
+            _log(f"ticket {ticket_id}: DRY RUN - would {'send to the sidebar' if sidebar else 'note'}: {note[:200]}")
             return "drafted"
 
-        result = self.client.add_note(ticket_id, note)
-        if isinstance(result, dict) and "error" in result:
-            _log(f"ticket {ticket_id}: could not post the draft: {result['error']}")
-            return "error"
+        where = "note"
+        if sidebar and self.deliver(self._sidebar_draft(ticket_id, summary, deployment, draft, handed_to,
+                                                        handover_note, new, bool(draft_label))):
+            where = "sidebar"
+        else:
+            if sidebar:
+                _log(f"ticket {ticket_id}: the CRM did not take the draft - posting it as a note")
+            result = self.client.add_note(ticket_id, note)
+            if isinstance(result, dict) and "error" in result:
+                _log(f"ticket {ticket_id}: could not post the draft: {result['error']}")
+                return "error"
 
         self._mark_answered(ticket_id, latest_id)
         if draft_label:
             self._clear_label(ticket_id, summary, draft_label)
-        _log(f"ticket {ticket_id}: drafted ({len(note)} chars{', handover suggested' if handed_to else ''}"
-             f"{', on request' if draft_label else ''}; model {model_seconds:.1f}s over {model_calls} call(s))")
+        _log(f"ticket {ticket_id}: drafted to the {where} ({len(draft.strip())} chars"
+             f"{', handover suggested' if handed_to else ''}{', on request' if draft_label else ''}; "
+             f"model {model_seconds:.1f}s over {model_calls} call(s))")
         return "drafted"
+
+    @staticmethod
+    def _sidebar_draft(ticket_id: str, summary: dict, deployment: dict, draft: str, handed_to: str | None,
+                       handover_note: str, answering: str, on_request: bool) -> dict:
+        """What the CRM records and the sidebar shows: the reply, the customer
+        lines it answers, and where the agent would have handed over."""
+        reason = ""
+        if handed_to:
+            first, _, rest = handover_note.partition("\n")
+            priority = first[first.find("(") + 1:first.find(")")] if "(" in first else "normal"
+            reason = (f"{priority.capitalize()} priority. " if priority != "normal" else "") + rest.strip()
+        return {
+            "draft_id": uuid.uuid4().hex[:24],
+            "ticket_id": ticket_id,
+            "channel_id": str(summary.get("channel_id") or ""),
+            "agent": deployment.get("agent"),
+            "draft": draft.strip(),
+            "customer_message": answering,
+            "handover_team": handed_to or None,
+            "handover_reason": reason or None,
+            "on_request": on_request,
+        }
 
     def _clear_label(self, ticket_id: str, summary: dict, label: str) -> None:
         """Take the advisor's draft label off, so adding it again asks again."""
