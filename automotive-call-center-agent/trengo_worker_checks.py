@@ -21,10 +21,12 @@ import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-not-used")
 os.environ.pop("CRM_API_BASE_URL", None)
 
+import agent  # noqa: E402
 import agent_context  # noqa: E402
 import trengo  # noqa: E402
 import trengo_webhook  # noqa: E402
@@ -367,6 +369,49 @@ check("sidebar: a label request goes to the sidebar, marked on request",
 delivered.clear()
 w, made, _ = drafting_worker([msg(1, "Open Saturday?")], sidebar_routing, dry_run=True, deliver=crm_takes)
 check("sidebar dry run: nothing delivered", w.handle_ticket(owned) == "drafted" and not delivered)
+
+# -- one reply per turn: an answer restated after a tool call appears once ------------------------
+def turn(*messages):
+    """Assistant messages of one turn; each is (text blocks..., optional tool name)."""
+    out = []
+    for blocks in messages:
+        content = [SimpleNamespace(type="text", text=b) for b in blocks if not b.startswith("tool:")]
+        content += [SimpleNamespace(type="tool_use", name=b[5:]) for b in blocks if b.startswith("tool:")]
+        out.append({"role": "assistant", "content": content})
+    return agent._turn_text(out)
+
+
+first = ("We don't have a used CX-9 in stock right now, and your request is registered so the used-vehicle team "
+         "can call you when a matching one comes in.\n\nTo help them match it: what model year are you looking for, "
+         "what budget range do you have in mind, and is +961 76 594 538 the best number to reach you?")
+again = ("We don't have a used CX-9 in stock at the moment, and your request is already registered so the used-vehicle "
+         "team can call you as soon as a matching one arrives.\n\nTo help them find the right car: which model year are "
+         "you looking for, what budget range do you have in mind, and is +961 76 594 538 the best number to reach you?")
+check("an answer reworded after two tool rounds appears once - the later version (ticket 990673035)",
+      turn([first, "tool:memory"], ["tool:search_knowledge"], [again]) == again)
+noted = ("Noted, we'll keep your request on file for a pre-owned CX-9 and contact you on this number as soon as one "
+         "comes in. One thing that helps us match you faster: what budget range (and model year, if you have one in "
+         "mind) are you looking at?")
+noted_again = ("Noted, we'll keep your request on file for a pre-owned CX-9 and contact you on this number as soon as "
+               "one comes in. To help us match you faster: what budget range are you considering, and do you have a "
+               "particular model year in mind?")
+check("a shorter rewording still replaces the first", turn([noted, "tool:memory"], [noted_again]) == noted_again)
+check("an Arabic answer reworded appears once",
+      turn(["أكيد، منعمل صيانة للـ Beverly S 300 وفي عنا قطع غيار أصلية، وفيك تحجز موعد بالورشة بأي يوم من الاثنين للجمعة.",
+            "tool:search_knowledge"],
+           ["أكيد، منعمل صيانة للـ Beverly S 300 وعنا قطع غيار أصلية، وفيك تحجز موعد بالورشة أي يوم من الاثنين للجمعة."]).count("Beverly") == 1)
+check("a fact before the tool call and a different answer after it are both kept",
+      turn(["Nahr El Mot is closed on Saturdays.", "tool:search_knowledge"],
+           ["As mentioned, you can come to Jal El Dib on Monday instead. Which time suits you?"])
+      == "Nahr El Mot is closed on Saturdays.\n\nAs mentioned, you can come to Jal El Dib on Monday instead. Which time suits you?")
+check("two short lines that share most words are both kept",
+      turn(["Jal El Dib is open Monday to Friday 8 to 5.", "tool:search_knowledge"],
+           ["Chtaura is open Monday to Friday 8 to 5."]).count("open") == 2)
+check("two different paragraphs on the same car are both kept",
+      turn(["The CX-5 2024 comes with a 2.5 litre engine, all-wheel drive and a six-speed automatic gearbox as standard.",
+            "tool:search_knowledge"],
+           ["Its next service is due at 20,000 km or after one year, whichever comes first, at any of our workshops."])
+      .count("\n\n") == 1)
 
 # -- the webhook queue ---------------------------------------------------------------------------
 class RecordingWorker:

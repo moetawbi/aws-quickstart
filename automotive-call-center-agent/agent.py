@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import threading
 from datetime import datetime
@@ -52,6 +53,12 @@ MODEL = os.environ.get("CALL_CENTER_MODEL", "claude-opus-5")
 EFFORT = os.environ.get("CALL_CENTER_EFFORT", "medium")
 MAX_TOKENS = 16000
 MAX_PAUSE_RESTARTS = 5
+# A later text block that shares this much of an earlier one's words (Dice
+# over distinct words) restates it; blocks with fewer distinct words than
+# RESTATE_MIN_WORDS are never judged - two short lines can share most words
+# and still say different things ("Jal El Dib opens at 8" / "Chtaura opens at 8").
+RESTATE_MIN_OVERLAP = 0.7
+RESTATE_MIN_WORDS = 12
 
 # How a turn is delivered (see _turn_text). Owned by the runtime rather than
 # the CRM persona because it describes this code, and constant so the cached
@@ -316,8 +323,9 @@ def _turn_text(assistant_messages: list[dict]) -> str:
 
 def _add_text(texts: list[str], text: str) -> None:
     """Append a text block unless it repeats one already in the turn - the
-    model sometimes writes its answer, calls a tool, then writes it again.
-    Of two near-copies the fuller one is kept."""
+    model sometimes writes its answer, calls a tool, then writes it again,
+    often reworded. Of two near-copies the fuller one is kept; of an answer
+    and its rewording, the later one, written with the tool's result."""
     norm = " ".join(text.split()).lower()
     for i, earlier in enumerate(texts):
         seen = " ".join(earlier.split()).lower()
@@ -327,7 +335,18 @@ def _add_text(texts: list[str], text: str) -> None:
             if len(norm) > len(seen):
                 texts[i] = text
             return
+        if _restates(earlier, text):
+            texts[i] = text
+            return
     texts.append(text)
+
+
+def _restates(earlier: str, later: str) -> bool:
+    """`later` says again, in other words, what `earlier` said."""
+    a, b = (set(re.findall(r"\w+", t.lower())) for t in (earlier, later))
+    if min(len(a), len(b)) < RESTATE_MIN_WORDS:
+        return False
+    return 2 * len(a & b) / (len(a) + len(b)) >= RESTATE_MIN_OVERLAP
 
 
 def _call_context() -> str:
