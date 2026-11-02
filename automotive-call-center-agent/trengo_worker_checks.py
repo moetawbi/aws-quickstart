@@ -194,6 +194,8 @@ check("assist agent: deployed slug, read-only, rehearsing handovers",
 turn = made[0][2].turns[0]
 check("assist context: advisor reply as 'Us', old draft note excluded, no 'since' block",
       "Assist mode" in turn and "Us: Hi, how can I help?" in turn and "old draft" not in turn and "Since then" not in turn)
+check("assist context: the reply is copied to the customer as it is - no notes for the advisor in it",
+      "sends it to the customer as it is" in turn and "never add a note, summary or lead details for the advisor" in turn)
 check("the same message is never drafted twice", w.handle_ticket(owned) == "skipped" and len(w.client.notes) == 1)
 check("drafting never marks the ticket handed over", "77" not in json.loads(state.read_text())["handed_over"])
 

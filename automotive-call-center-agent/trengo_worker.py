@@ -106,10 +106,11 @@ MAX_WAIT_SECONDS = float(os.environ.get("TRENGO_MAX_WAIT_SECONDS", "30"))
 # Trengo's API times carry no offset: they are the account's local time.
 TRENGO_TZ = ZoneInfo(os.environ.get("TRENGO_TIMEZONE", "Europe/Amsterdam"))
 ASSIST_INSTRUCTIONS = (
-    "Assist mode: an ANB advisor reads your reply and sends it themselves, so write it exactly as "
-    "it should reach the customer, on behalf of ANB's team - do not introduce yourself or sign "
-    "with a name. You cannot create leads here - when you would, collect the details in your "
-    "reply and the advisor will create the lead."
+    "Assist mode: an ANB advisor copies your reply and sends it to the customer as it is, so write "
+    "only the message to the customer, exactly as it should reach them, on behalf of ANB's team - "
+    "do not introduce yourself or sign with a name, and never add a note, summary or lead details "
+    "for the advisor. You cannot create leads here: when you would, make sure your reply asks for "
+    "whatever the team still needs; the advisor creates the lead from the conversation."
 )
 
 
