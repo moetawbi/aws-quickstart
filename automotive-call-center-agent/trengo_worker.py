@@ -65,6 +65,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import agent_config
 import agent_context
@@ -88,6 +89,14 @@ ASSIST_HEADER = "🤖 AI draft (Assist) - review before sending"
 # A draft an advisor asked for with the draft label. The CRM reads both
 # headers to measure how drafts are used - keep the "🤖 AI draft (Assist" start.
 ASSIST_HEADER_ON_REQUEST = "🤖 AI draft (Assist, on request) - review before sending"
+ASSIST_HEADER_PREFIX = "🤖 AI draft (Assist"
+# A customer whose newest message is younger than this is still writing: the
+# draft waits for the pause, by Trengo's own timestamps - a ring can race the
+# CRM's webhook and arrive with the customer mid-burst - but never past the cap.
+QUIET_SECONDS = float(os.environ.get("TRENGO_QUIET_SECONDS", "8"))
+MAX_WAIT_SECONDS = float(os.environ.get("TRENGO_MAX_WAIT_SECONDS", "30"))
+# Trengo's API times carry no offset: they are the account's local time.
+TRENGO_TZ = ZoneInfo(os.environ.get("TRENGO_TIMEZONE", "Europe/Amsterdam"))
 ASSIST_INSTRUCTIONS = (
     "Assist mode: an ANB advisor reads your reply and sends it themselves, so write it exactly as "
     "it should reach the customer, on behalf of ANB's team - do not introduce yourself or sign "
@@ -130,6 +139,9 @@ class TrengoWorker:
         self.agents: dict[str, CallCenterAgent] = {}  # live sessions, keyed by ticket id
         self.replied: dict[str, int] = {}
         self.handed_over: dict[str, dict] = {}  # ticket id -> {"team", "at"}
+        # A "deferred" ticket's wait, for the webhook queue to try it again.
+        self.defer_seconds: dict[str, float] = {}
+        self._waiting_since: dict[str, float] = {}
         self._load_state()
 
     # -- state ---------------------------------------------------------------
@@ -279,6 +291,43 @@ class TrengoWorker:
             start += 1
         return visible[start:end + 1]
 
+    @staticmethod
+    def _age_seconds(message: dict) -> float | None:
+        """How long ago Trengo received the message; None when it has no time."""
+        try:
+            created = datetime.strptime(str(message.get("created_at") or "")[:19], "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+        return (datetime.now(timezone.utc) - created.replace(tzinfo=TRENGO_TZ)).total_seconds()
+
+    def _still_typing(self, ticket_id: str, newest: dict) -> float:
+        """Seconds to wait for the customer to pause before drafting; 0 to draft now."""
+        age = self._age_seconds(newest)
+        if age is None or age >= QUIET_SECONDS:
+            self._waiting_since.pop(ticket_id, None)
+            return 0.0
+        since = self._waiting_since.setdefault(ticket_id, time.monotonic())
+        left = MAX_WAIT_SECONDS - (time.monotonic() - since)
+        if left <= 0:
+            self._waiting_since.pop(ticket_id, None)
+            return 0.0
+        return max(1.0, min(QUIET_SECONDS - age, left))
+
+    @staticmethod
+    def _unsent_drafts(messages: list[dict]) -> list[str]:
+        """Our Assist drafts posted since a person last replied - the advisor
+        has them but has not sent anything yet. Bodies only, newest last."""
+        last_reply = max((i for i, m in enumerate(messages) if not trengo.is_internal_note(m)
+                          and not trengo.is_inbound(m) and not trengo.is_automated(m)), default=-1)
+        drafts = []
+        for message in messages[last_reply + 1:]:
+            text = trengo.message_text(message)
+            if trengo.is_internal_note(message) and text.startswith(ASSIST_HEADER_PREFIX):
+                body = text.partition("\n")[2].split("↪ Would hand over to", 1)[0].strip()
+                if body and not body.startswith("No draft"):
+                    drafts.append(body)
+        return drafts[-2:]
+
     def _assist(self, ticket_id: str, summary: dict, messages: list[dict], deployment: dict,
                 draft_label: str = "") -> str:
         """Draft the reply to the customer's unanswered messages as an internal
@@ -299,6 +348,12 @@ class TrengoWorker:
                 self._clear_label(ticket_id, summary, draft_label)
             return "skipped"  # nothing new from the customer, or an advisor already replied
         latest_id = max(int(m.get("id") or 0) for m in unanswered)
+
+        # Still writing: one draft for the whole burst, once they pause. An
+        # advisor's label request is drafted at once.
+        if not draft_label and (wait := self._still_typing(ticket_id, customer[-1])) > 0:
+            self.defer_seconds[ticket_id] = wait
+            return "deferred"
 
         kinds = list(dict.fromkeys(kind for kind in map(trengo.media_kind, customer) if kind))
         if kinds:
@@ -335,6 +390,15 @@ class TrengoWorker:
             if since:
                 user_turn += ("\n\nSince then:\n" + "\n".join(since)
                               + "\nDraft the next reply, building on what the team already said.")
+            # Notes cannot be edited or removed in Trengo, so a follow-up draft
+            # adds to the one the advisor already has instead of repeating it.
+            earlier = [] if draft_label else self._unsent_drafts(messages)
+            if earlier:
+                user_turn += ("\n\nYour earlier draft(s) on this ticket, posted as internal notes since we last "
+                              "replied - the advisor has them but has not sent anything yet:\n---\n"
+                              + "\n---\n".join(earlier) + "\n---\n"
+                              "Write only what the customer's new message needs on top of that: no greeting, "
+                              "nothing the earlier draft already says. The advisor may send both, one after the other.")
             with agent_context.conversation(
                 agent_slug=getattr(agent, "agent_slug", None),
                 agent_config=getattr(agent, "config", None),

@@ -18,6 +18,8 @@ import queue
 import sys
 import tempfile
 import threading
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
 
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-not-used")
@@ -38,10 +40,13 @@ def check(label: str, ok) -> None:
         failures.append(label)
 
 
-def msg(i, text, inbound=True, body_type="TEXT", bot=False):
+def msg(i, text, inbound=True, body_type="TEXT", bot=False, ago=None):
     """A Trengo message as GET /tickets/{id}/messages returns it. An advisor's
-    reply carries its author; the chatbot's is an auto-reply with none."""
+    reply carries its author; the chatbot's is an auto-reply with none.
+    `ago`: seconds since Trengo received it (its created_at, Amsterdam time)."""
     m = {"id": i, "message": text, "type": "INBOUND" if inbound else "OUTBOUND", "body_type": body_type}
+    if ago is not None:
+        m["created_at"] = (datetime.now(trengo_worker.TRENGO_TZ) - timedelta(seconds=ago)).strftime("%Y-%m-%d %H:%M:%S")
     if not inbound:
         m.update({"is_auto_reply": 1} if bot else {"agent": {"name": "Pamela"}})
     return m
@@ -274,6 +279,39 @@ w, made, _ = drafting_worker([msg(1, "Hello")], assist_routing, dry_run=True)
 check("label dry run: no note, no label removal",
       w.handle_ticket(unowned, draft_label="AI Draft") == "drafted" and not w.client.notes and not w.client.removed)
 
+# -- waiting for the customer to finish ----------------------------------------------------------
+w, made, _ = drafting_worker([msg(1, "I need a service", ago=20), msg(2, "for my Vespa", ago=2)], assist_routing)
+check("still typing (newest line 2 s old): no draft yet, try again in ~6 s",
+      w.handle_ticket(owned) == "deferred" and not made and 4 <= w.defer_seconds["77"] <= 7)
+w, made, _ = drafting_worker([msg(1, "I need a service", ago=20), msg(2, "for my Vespa", ago=9)], assist_routing)
+check("paused 9 s: drafted, both lines in one draft",
+      w.handle_ticket(owned) == "drafted" and "I need a service\nfor my Vespa" in made[-1][2].turns[0])
+w, made, _ = drafting_worker([msg(1, "Still typing", ago=1)], assist_routing)
+w._waiting_since["77"] = time.monotonic() - 31
+check("still typing past the 30 s cap: drafted anyway", w.handle_ticket(owned) == "drafted")
+w, made, _ = drafting_worker([msg(1, "Still typing", ago=1)], assist_routing)
+check("a label request never waits", w.handle_ticket(owned, draft_label="AI Draft") == "drafted")
+w, made, _ = drafting_worker([msg(1, "Old message")], assist_routing)
+check("no timestamp on the message: drafted (never stuck waiting)", w.handle_ticket(owned) == "drafted")
+
+# -- a follow-up adds to the draft the advisor already has --------------------------------------
+draft_note = {"id": 2, "type": "NOTE", "message": "🤖 AI draft (Assist) - review before sending\n\nAhlan! How can we help?"
+              "\n\n↪ Would hand over to ANB Call Center:\nnote"}
+w, made, _ = drafting_worker([msg(1, "Salam"), draft_note, msg(3, "I need parts for my Vespa")], assist_routing)
+w.replied["77"] = 1
+w.handle_ticket(owned)
+turn = made[-1][2].turns[0]
+check("follow-up: told about the earlier unsent draft (body only), asked for no greeting and no repeats",
+      "Your earlier draft(s)" in turn and "Ahlan! How can we help?" in turn and "Would hand over" not in turn
+      and "no greeting" in turn and "New message from the customer:\nI need parts for my Vespa" in turn)
+w, made, _ = drafting_worker([msg(1, "Salam"), draft_note, msg(3, "Welcome!", inbound=False), msg(4, "Parts please")],
+                             assist_routing)
+w.handle_ticket(owned)
+check("once a person replied, earlier drafts are history, not pending", "Your earlier draft(s)" not in made[-1][2].turns[0])
+w, made, _ = drafting_worker([msg(1, "Salam"), draft_note, msg(3, "Parts please")], assist_routing)
+w.handle_ticket(owned, draft_label="AI Draft")
+check("a label request gets a complete draft, not an add-on", "Your earlier draft(s)" not in made[-1][2].turns[0])
+
 # -- the webhook queue ---------------------------------------------------------------------------
 class RecordingWorker:
     def __init__(self):
@@ -292,6 +330,25 @@ q.submit("88", draft_label="AI Draft")
 check("queue: a label upgrades a pending routine ring", q._pending == {"88": "AI Draft"} and q._queue.qsize() == 1)
 q.submit("88")
 check("queue: a later routine ring never downgrades it", q._pending == {"88": "AI Draft"})
+
+
+class DeferringWorker:
+    def __init__(self):
+        self.calls, self.defer_seconds = 0, {}
+
+    def handle_ticket_id(self, ticket_id, draft_label=""):
+        self.calls += 1
+        if self.calls == 1:
+            self.defer_seconds[ticket_id] = 0.05
+            return "deferred"
+        return "drafted"
+
+
+dq = trengo_webhook.TicketQueue(DeferringWorker())
+dq.submit("99")
+time.sleep(0.3)
+dq.drain()
+check("queue: a deferred ticket is tried again after the wait", dq.worker.calls == 2)
 
 # -- switches ----------------------------------------------------------------------------------
 os.environ["TRENGO_NOTES_ENABLED"] = ""

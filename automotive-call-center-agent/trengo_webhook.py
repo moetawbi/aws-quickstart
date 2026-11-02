@@ -140,6 +140,14 @@ class TicketQueue:
             started = time.monotonic()
             try:
                 outcome = self.worker.handle_ticket_id(ticket_id, draft_label=draft_label)
+                if outcome == "deferred":
+                    # The customer is still writing: try again once they pause.
+                    wait = getattr(self.worker, "defer_seconds", {}).pop(ticket_id, 5.0)
+                    timer = threading.Timer(wait, self.submit, args=(ticket_id, draft_label))
+                    timer.daemon = True
+                    timer.start()
+                    _log(f"ticket {ticket_id}: customer still writing - trying again in {wait:.0f}s")
+                    continue
                 # waited: behind other tickets here; took: reading Trengo, the model, posting.
                 waited = f"waited {started - rung_at:.1f}s, " if rung_at is not None else ""
                 _log(f"ticket {ticket_id}: {outcome} ({waited}took {time.monotonic() - started:.1f}s)")
