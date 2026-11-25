@@ -9,6 +9,7 @@ Endpoints (JSON in, JSON out; every request must carry the token as
     GET    /healthz                     liveness, no token required
     GET    /chat/sessions               live sessions (id, persona, turns, age)
     POST   /chat                        send one message, get the reply
+    POST   /engage/turn                 answer one turn of an Engage conversation (see engage_turn)
     DELETE /chat/{session_id}           end one session
 
 POST /chat body::
@@ -67,7 +68,7 @@ import anthropic
 
 import agent_config
 import agent_context
-from agent import CHANNEL_MESSAGING, PERSONA_CUSTOMER, PERSONA_INTERNAL, PERSONAS, CallCenterAgent, local_now
+from agent import CHANNEL_EMAIL, CHANNEL_MESSAGING, PERSONA_CUSTOMER, PERSONA_INTERNAL, PERSONAS, CallCenterAgent, local_now
 
 BIND = os.environ.get("CHAT_API_BIND", "127.0.0.1")
 PORT = int(os.environ.get("CHAT_API_PORT", "8082"))
@@ -208,6 +209,75 @@ def opening_context(persona: str, read_only: bool, context: dict,
     return "\n".join(lines)
 
 
+ENGAGE_MAX_MESSAGES = int(os.environ.get("ENGAGE_TURN_MAX_MESSAGES", "40"))
+ENGAGE_SPEAKERS = {"customer": "Customer", "team": "Team", "journey": "Us (automated)", "agent": "You (earlier)"}
+
+
+def engage_turn(payload: dict, agent_factory=CallCenterAgent) -> dict:
+    """One turn of the CRM's Engage inbox: a journey's "Assign to AI agent"
+    step hands the whole conversation over and sends the answer itself.
+
+    A fresh agent per turn, fed the whole conversation (like the Trengo Assist
+    drafts), so nothing depends on a session surviving between the customer's
+    messages. Customer persona; handover is rehearsed (escalate_to_human runs
+    against no ticket and is reported back): Engage hands the conversation to
+    its team itself. Lead creation only when the step allows it.
+
+    payload: {"agent": slug, "channel": "whatsapp"|"email"|..., "channel_name": str,
+              "customer": {"name": str, "phone": str},
+              "conversation": [{"from": "customer"|"team"|"journey"|"agent", "text": str}, ...],
+              "may_create_leads": bool}
+    returns: {"reply": str, "handover": null | {"team": str, "note": str}, "tools_used": [...], "agent": slug}
+    """
+    conversation = [m for m in (payload.get("conversation") or []) if isinstance(m, dict) and str(m.get("text") or "").strip()]
+    if not conversation or conversation[-1].get("from") != "customer":
+        raise ValueError("the conversation must end with the customer's message")
+
+    slug = str(payload.get("agent") or "").strip() or None
+    config = agent_config.fetch_or_none(slug) if agent_config.available() else None
+    channel = CHANNEL_EMAIL if str(payload.get("channel") or "").lower() == "email" else CHANNEL_MESSAGING
+    may_create_leads = bool(payload.get("may_create_leads"))
+    agent = agent_factory(persona=PERSONA_CUSTOMER, read_only=not may_create_leads, config=config,
+                          handover_rehearsal=True, channel=channel)
+
+    channel_label = " - ".join(filter(None, [str(payload.get("channel") or "").strip(), " ".join(str(payload.get("channel_name") or "").split())[:120]])) or "messaging"
+    customer = payload.get("customer") if isinstance(payload.get("customer"), dict) else {}
+    lines = [
+        f"[Conversation metadata - not written by the customer] Now (Lebanon time): {local_now()}. "
+        f"Channel: {channel_label} (written conversation - reply in the customer's language, "
+        "no greeting on every message, keep it brief). You are answering on your own: what you write is sent to the customer as it is.",
+    ]
+    if customer.get("name"):
+        lines.append(f"Customer name: {str(customer['name'])[:120]}.")
+    if customer.get("phone"):
+        lines.append(f"Phone number: {str(customer['phone'])[:40]}.")
+    lines.append("\nConversation so far (oldest first):")
+    for message in conversation[-ENGAGE_MAX_MESSAGES:]:
+        who = ENGAGE_SPEAKERS.get(str(message.get("from")), "Team")
+        lines.append(f"{who}: {str(message['text'])[:MAX_MESSAGE_CHARS]}")
+    lines.append("\nWrite your reply to the customer's latest message(s). If they ask for a person, or you cannot "
+                 "help, hand the conversation over (escalate_to_human) and tell them a colleague will reply.")
+
+    with agent_context.conversation(
+        agent_slug=(config or {}).get("slug"),
+        agent_config=config,
+        trengo_ticket_id=f"engage-{uuid.uuid4().hex[:10]}",
+        trengo_dry_run=True,   # a rehearsal: nothing reaches Trengo, Engage hands over itself
+    ):
+        before = len(getattr(agent, "messages", []))
+        reply = agent.send("\n".join(lines))
+        tools_used = ChatHandler._tools_used(getattr(agent, "messages", [])[before:])
+        handed_to = agent_context.handed_over()
+        note = agent_context.handover_note()
+
+    return {
+        "reply": reply or "",
+        "handover": {"team": handed_to, "note": note} if handed_to else None,
+        "tools_used": tools_used,
+        "agent": (config or {}).get("slug") or slug,
+    }
+
+
 class ChatServer(ThreadingHTTPServer):
     daemon_threads = True
 
@@ -276,8 +346,12 @@ class ChatHandler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._send_json(401, {"error": "bad or missing chat token"})
             return
-        if self.path.split("?")[0].rstrip("/") != "/chat":
-            self._send_json(404, {"error": "not found; POST /chat"})
+        path = self.path.split("?")[0].rstrip("/")
+        if path == "/engage/turn":
+            self._engage_turn()
+            return
+        if path != "/chat":
+            self._send_json(404, {"error": "not found; POST /chat or /engage/turn"})
             return
         payload = self._body()
         if payload is None:
@@ -372,6 +446,32 @@ class ChatHandler(BaseHTTPRequestHandler):
             "new_session": is_new,
             "handover": handed_over,
         })
+
+    def _engage_turn(self) -> None:
+        payload = self._body()
+        if payload is None:
+            return
+        try:
+            result = engage_turn(payload)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        except anthropic.RateLimitError as exc:
+            self._send_json(429, {"error": "the model is rate limited", "retry_after": exc.response.headers.get("retry-after", "60")})
+            return
+        except anthropic.APIStatusError as exc:
+            self._send_json(502, {"error": f"model API error {exc.status_code}: {exc.message}"})
+            return
+        except anthropic.APIConnectionError:
+            self._send_json(504, {"error": "could not reach the model API"})
+            return
+        except Exception as exc:  # never leak a traceback to the CRM
+            _log(f"engage turn failed: {exc.__class__.__name__}: {exc}")
+            self._send_json(500, {"error": f"agent error ({exc.__class__.__name__})"})
+            return
+        _log(f"[{result.get('agent') or 'built-in'}] engage turn ({len(result['reply'])} chars out, "
+             f"tools: {','.join(result['tools_used']) or '-'}{', handover' if result['handover'] else ''})")
+        self._send_json(200, result)
 
     def do_DELETE(self):
         if not self._authorized():

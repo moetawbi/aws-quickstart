@@ -212,6 +212,25 @@ count drops. View a memory file and see the agent's notes.
 
 ---
 
+## Part C — Engage journeys ("Assign to AI agent")
+
+The CRM's Engage inbox lets a journey hand a conversation to an agent. Each
+customer message is one call to `chat_api.py`:
+
+```
+POST /engage/turn            (Authorization: Bearer <CHAT_API_TOKEN>)
+{"agent": "call-center", "channel": "whatsapp", "channel_name": "WhatsApp Motorsports",
+ "customer": {"name": "Karim", "phone": "+9613222333"},
+ "conversation": [{"from": "customer" | "team" | "journey" | "agent", "text": "..."}],   # oldest first, ends with the customer
+ "may_create_leads": false}
+→ 200 {"reply": "...", "handover": null | {"team": "...", "note": "..."}, "tools_used": [...], "agent": "call-center"}
+```
+
+- A fresh customer-persona agent per turn, fed the whole conversation (like the Trengo Assist drafts): nothing depends on a session surviving between messages.
+- Handover is rehearsed (`trengo_dry_run`): `escalate_to_human` touches no ticket and comes back as `handover`; the CRM hands the conversation to its team itself.
+- Read-only (no `create_lead`) unless `may_create_leads` is true.
+- `engage_turn()` is a plain function (the handler calls it), so it can be checked with a fake agent factory.
+
 ## Kickoff prompt for a Claude Code session in the CRM repo
 
 Paste this into `claude` running in `/Users/moetawbi/Sites/anb-used-vehicles`:
